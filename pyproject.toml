@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anytran"
+version = "0.1.0"
+description = "Real-time audio translation for RTSP streams, system output, and web audio."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Anytran" }]
+
+# Base deps cover common offline workflows; optional features use extras below.
+dependencies = [
+  "numpy",
+  "soundfile",
+  "librosa",
+  "pydub",
+  "moviepy",
+  "gTTS",
+  "playsound3",
+  "paho-mqtt",
+  "pathvalidate",
+]
+
+[project.optional-dependencies]
+rtsp = ["av"]
+web = ["fastapi", "uvicorn[standard]"]
+youtube = ["yt-dlp"]
+vad = ["silero-vad"]
+piper = ["piper-tts"]
+# For CUDA support: install pywhispercpp separately FIRST with editable flag
+# GGML_CUDA=1 pip install -e git+https://github.com/absadiki/pywhispercpp#egg=pywhispercpp
+# Then: pip install -e .[whispercpp]
+whispercpp = ["pywhispercpp"]
+faster-whisper = ["faster-whisper", "ctranslate2", "torch", "torchaudio"]
+whisper-ctranslate2 = ["whisper-ctranslate2"]
+output = ["pyaudiowpatch; sys_platform == 'win32'", "pyaudio; sys_platform != 'win32'"]
+# Text translation backends (pick one or more)
+googletrans = ["googletrans==4.0.0rc1", "httpcore==0.9.1", "httpx==0.13.3", "huggingface_hub==0.36.2"]
+libretranslate = ["requests", "libretranslate"]
+translategemma = ["transformers==4.57.3", "torch", "accelerate"]
+marianmt = ["transformers==4.57.3", "torch", "sentencepiece", "sacremoses"]
+all = [
+  "av",
+  "fastapi",
+  "uvicorn[standard]",
+  "yt-dlp",
+  "silero-vad",
+  "piper-tts",
+  "pywhispercpp",
+  "faster-whisper",
+  "whisper-ctranslate2",
+  "ctranslate2",
+  "torch",
+  "torchaudio",
+  "pyaudiowpatch; sys_platform == 'win32'",
+  "pyaudio; sys_platform != 'win32'",
+  "huggingface_hub==0.36.2", 
+  "googletrans==4.0.0rc1",
+  "httpcore==0.9.1",
+  "httpx==0.13.3",
+  "requests",
+  "libretranslate",
+  "accelerate",
+  "transformers==4.57.3",
+  "sentencepiece",
+  "sacremoses",
+]
+
+[project.scripts]
+anytran = "anytran.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anytran"]

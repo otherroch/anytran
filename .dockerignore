@@ -1,0 +1,9 @@
+venv
+.venv
+voicetran.code-workspace
+docker-compose.yml
+chat
+models
+codeExamples
+.mp3
+.txt
