@@ -164,6 +164,9 @@ def run(selected_languages, output_file):
             {
                 "onnx_file": v["onnx_file"],
                 "pitch": round(features["mean_pitch"], 2),
+                "pitch_std": round(features["pitch_std"], 2),
+                "zcr": round(features["zcr"], 4),
+                "brightness": round(features["brightness"], 2),
                 "gender": features["gender"],
             }
         )

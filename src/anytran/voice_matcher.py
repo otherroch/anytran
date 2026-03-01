@@ -148,34 +148,44 @@ def select_best_piper_voice(features, language="en", verbose=False):
     if not lang_voices:
         return None
     
-    # Find closest match by pitch and gender
+    # Find closest match by voice attributes and gender
     best_voice = None
-    gender_match_min_diff = float('inf')
+    gender_match_min_score = float('inf')
     fallback_voice = None
-    fallback_min_diff = float('inf')
+    fallback_min_score = float('inf')
     
     if verbose:
         print(f"Searching for {language} voices matching: gender={features['gender']}, pitch={features['mean_pitch']:.1f}Hz")
     
     # First pass: Find best match with same gender
     for voice_name, voice_data in lang_voices.items():
-        pitch_diff = abs(features["mean_pitch"] - voice_data["pitch"])
-        # Track fallback option (closest pitch regardless of gender)
-        if pitch_diff < fallback_min_diff:
-            fallback_min_diff = pitch_diff
+        match_score = _voice_match_score(features, voice_data)
+        pitch_diff = abs(features["mean_pitch"] - voice_data["pitch"]) if verbose else None
+        # Track fallback option (closest score regardless of gender)
+        if match_score < fallback_min_score:
+            fallback_min_score = match_score
             fallback_voice = voice_name
         
         # Prioritize gender match
         if features["gender"] == voice_data["gender"]:
-            if pitch_diff < gender_match_min_diff:
-                gender_match_min_diff = pitch_diff
+            if match_score < gender_match_min_score:
+                gender_match_min_score = match_score
                 best_voice = voice_name
                 if verbose:
-                    print(f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz (diff={pitch_diff:.1f}Hz) ✓ MATCH")
+                    print(
+                        f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz "
+                        f"(diff={pitch_diff:.1f}Hz, score={match_score:.2f}) ✓ MATCH"
+                    )
             elif verbose:
-                print(f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz (diff={pitch_diff:.1f}Hz)")
+                print(
+                    f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz "
+                    f"(diff={pitch_diff:.1f}Hz, score={match_score:.2f})"
+                )
         elif verbose:
-            print(f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz (diff={pitch_diff:.1f}Hz) [no gender match]")
+            print(
+                f"  - {voice_name}: gender={voice_data['gender']}, pitch={voice_data['pitch']}Hz "
+                f"(diff={pitch_diff:.1f}Hz, score={match_score:.2f}) [no gender match]"
+            )
     
     # Use fallback if no gender match found
     if best_voice is None and fallback_voice is not None:
@@ -183,7 +193,7 @@ def select_best_piper_voice(features, language="en", verbose=False):
         fallback_data = lang_voices.get(fallback_voice, {})
         if verbose:
             print(f"\n⚠ No {features['gender']} voice available for {language}")
-            print(f"Using fallback: {fallback_voice} ({fallback_data.get('gender')} voice, pitch diff: {fallback_min_diff:.1f}Hz)")
+            print(f"Using fallback: {fallback_voice} ({fallback_data.get('gender')} voice, score: {fallback_min_score:.2f})")
             if len(lang_voices) == 1:
                 print(f"Note: {language} has only one available voice in Piper")
     
@@ -192,6 +202,19 @@ def select_best_piper_voice(features, language="en", verbose=False):
         print(f"\n✓ Selected Piper voice: {best_voice} (gender={selected_data.get('gender')}, pitch={selected_data.get('pitch')}Hz)")
     
     return best_voice
+
+
+def _voice_match_score(features, voice_data):
+    score = abs(features["mean_pitch"] - voice_data["pitch"]) / 30.0
+
+    if "pitch_std" in features and voice_data.get("pitch_std") is not None:
+        score += abs(features["pitch_std"] - voice_data["pitch_std"]) / 20.0
+    if "zcr" in features and voice_data.get("zcr") is not None:
+        score += abs(features["zcr"] - voice_data["zcr"]) / 0.05
+    if "brightness" in features and voice_data.get("brightness") is not None:
+        score += abs(features["brightness"] - voice_data["brightness"]) / 500.0
+
+    return score
 
 
 @lru_cache(maxsize=1)
@@ -214,5 +237,8 @@ def _load_piper_voices():
         piper_voices.setdefault(lang_base, {})[voice_name] = {
             "pitch": pitch,
             "gender": gender,
+            "pitch_std": entry.get("pitch_std"),
+            "zcr": entry.get("zcr"),
+            "brightness": entry.get("brightness"),
         }
     return piper_voices
