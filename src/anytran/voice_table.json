@@ -1,0 +1,77 @@
+[
+  {
+    "onnx_file": "en_US-libritts-high.onnx",
+    "pitch": 195,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "en_US-lessac-medium.onnx",
+    "pitch": 180,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "en_US-amy-medium.onnx",
+    "pitch": 190,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "en_US-ryan-high.onnx",
+    "pitch": 115,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "en_US-norman-medium.onnx",
+    "pitch": 125,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "en_US-joe-medium.onnx",
+    "pitch": 110,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fr_FR-gilles-low.onnx",
+    "pitch": 114,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fr_FR-mls_1840-low.onnx",
+    "pitch": 121,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fr_FR-siwis-low.onnx",
+    "pitch": 196,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "fr_FR-tom-medium.onnx",
+    "pitch": 135,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fr_FR-upmc-medium.onnx",
+    "pitch": 120,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "es_ES-carlfm-x_low.onnx",
+    "pitch": 115,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "es_ES-mls_10246-low.onnx",
+    "pitch": 180,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "de_DE-thorsten-high.onnx",
+    "pitch": 120,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "de_DE-eva_k-x_low.onnx",
+    "pitch": 190,
+    "gender": "female"
+  }
+]
