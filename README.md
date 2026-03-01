@@ -70,3 +70,7 @@ Additional topic guides:
 - [TranslateGemma Setup](doc/TRANSLATEGEMMA_SETUP.md) — guide for using Google's local TranslateGemma AI model
 - [Voice Matching](doc/VOICE_MATCHING.md) — auto-matching voice features
 - [Loop Translation (looptran)](doc/LOOPTRAN.md) — iterative back-translation with `--looptran` and `--tran-converge`
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
