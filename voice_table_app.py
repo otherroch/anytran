@@ -2,6 +2,7 @@ import os
 import argparse
 import requests
 import json
+from requests import RequestException
 
 VOICES_JSON_URLS = (
     "https://huggingface.co/rhasspy/piper-voices/raw/main/voices.json",
@@ -24,7 +25,7 @@ def load_voices_catalog():
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             return response.json()
-        except Exception as exc:
+        except (RequestException, ValueError) as exc:
             errors.append(f"{url}: {exc}")
     raise RuntimeError("Could not fetch Piper voices catalog:\n" + "\n".join(errors))
 
@@ -35,6 +36,11 @@ def collect_voices_for_languages(catalog, selected_languages):
         voice.get("language", {}).get("family", "").lower()
         for voice in catalog.values()
         if voice.get("language", {}).get("family")
+    }
+    all_codes = {
+        voice.get("language", {}).get("code", "").lower()
+        for voice in catalog.values()
+        if voice.get("language", {}).get("code")
     }
     if selected == {"all"}:
         selected = all_families
@@ -64,10 +70,7 @@ def collect_voices_for_languages(catalog, selected_languages):
         requested
         for requested in selected
         if requested not in all_families
-        and requested not in {
-            voice.get("language", {}).get("code", "").lower()
-            for voice in catalog.values()
-        }
+        and requested not in all_codes
     )
     return voices, unknown_languages
 
@@ -79,7 +82,7 @@ def load_existing_entries(output_file):
         with open(output_file, "r", encoding="utf-8") as f:
             loaded = json.load(f)
         return loaded if isinstance(loaded, list) else []
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError):
         return []
 
 
@@ -148,7 +151,6 @@ def run(selected_languages, output_file):
                 download_mp3(v["url"], mp3_file)
             except Exception as e:
                 print(f"Error downloading {v['name']}: {e}")
-                results.append({"onnx_file": v["onnx_file"], "pitch": 0, "gender": "download_error"})
                 continue
         try:
             y, sr = librosa.load(mp3_file, sr=None)

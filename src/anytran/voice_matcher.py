@@ -199,7 +199,7 @@ def _load_piper_voices():
     try:
         with open(VOICE_TABLE_JSON_PATH, "r", encoding="utf-8") as f:
             table = json.load(f)
-    except Exception:
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
         return {}
 
     piper_voices = {}

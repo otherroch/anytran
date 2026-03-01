@@ -31,4 +31,5 @@ selfsigned.*
 *.mp3
 *.wav
 *.json
+!src/anytran/voice_table.json
 *.onnx
