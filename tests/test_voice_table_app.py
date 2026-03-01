@@ -1,4 +1,5 @@
 import json
+from unittest import mock
 
 import voice_table_app
 
@@ -49,3 +50,9 @@ def test_append_unique_entries_preserves_existing(tmp_path):
         {"onnx_file": "fr_FR-gilles-low.onnx", "pitch": 110, "gender": "male"},
         {"onnx_file": "fr_FR-siwis-low.onnx", "pitch": 190, "gender": "female"},
     ]
+
+
+def test_parse_args_uses_default_output():
+    with mock.patch("sys.argv", ["voice_table_app.py"]):
+        args = voice_table_app.parse_args()
+    assert args.output == voice_table_app.DEFAULT_OUTPUT_FILE

@@ -9,6 +9,7 @@ VOICES_JSON_URLS = (
     "https://raw.githubusercontent.com/LouisGameDev/piper-voices/main/voices.json",
 )
 VOICES_RESOLVE_BASE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+DEFAULT_OUTPUT_FILE = "src/anytran/voice_table.json"
 
 
 def download_mp3(url, filename):
@@ -114,7 +115,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        required=True,
+        default=DEFAULT_OUTPUT_FILE,
         help="Output JSON file path. Existing files are appended with new unique entries.",
     )
     return parser.parse_args()
