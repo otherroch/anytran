@@ -184,17 +184,12 @@ def get_faster_whisper_model(model_size="medium", device_preference="cuda", comp
     use_cuda = False
     if device_preference in ("cuda", "auto"):
         try:
-            import ctranslate2
+             import torch
 
-            use_cuda = ctranslate2.get_cuda_device_count() > 0
-        except Exception:
-            use_cuda = False
-        if not use_cuda:
-            try:
-                import torch
-
-                use_cuda = torch.cuda.is_available()
-            except Exception:
+             use_cuda = torch.cuda.is_available()
+        except ImportError:
+                use_cuda = False
+        except (AttributeError, RuntimeError):
                 use_cuda = False
 
     if device_preference == "cpu":
@@ -1121,8 +1116,8 @@ def get_effective_backend(backend_preference):
         return normalized_preference
     
     if _whisper_ctranslate2_available:
-            return "whisper_ctranslate2"
-    
+
+        return "whisper_ctranslate2"
     # Try backends in order of preference
     if _whispercpp_binding_available:
         return "whispercpp"
