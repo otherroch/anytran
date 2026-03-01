@@ -675,5 +675,61 @@ class TestMarianMTBackend(unittest.TestCase):
             self.assertEqual(result, "hallo")
 
 
+# ---------------------------------------------------------------------------
+# Tests for zh -> zh-cn mapping in googletrans backend
+# ---------------------------------------------------------------------------
+
+class TestGoogletransZhMapping(unittest.TestCase):
+    """translate_text_googletrans must map bare 'zh' target_lang to 'zh-cn'."""
+
+    @patch("anytran.text_translator._get_googletrans_translator")
+    def test_zh_mapped_to_zh_cn(self, mock_get_translator):
+        """When target_lang is 'zh', googletrans should be called with 'zh-cn'."""
+        mock_translator = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "你好"
+        mock_translator.translate.return_value = mock_result
+        mock_get_translator.return_value = mock_translator
+
+        text_translator._GOOGLETRANS_AVAILABLE = True
+        result = text_translator.translate_text_googletrans("hello", "en", "zh")
+
+        self.assertEqual(result, "你好")
+        call_kwargs = mock_translator.translate.call_args
+        self.assertEqual(call_kwargs.kwargs.get("dest") or call_kwargs[1].get("dest"), "zh-cn")
+
+    @patch("anytran.text_translator._get_googletrans_translator")
+    def test_zh_cn_unchanged(self, mock_get_translator):
+        """When target_lang is already 'zh-cn', it should pass through unchanged."""
+        mock_translator = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "你好"
+        mock_translator.translate.return_value = mock_result
+        mock_get_translator.return_value = mock_translator
+
+        text_translator._GOOGLETRANS_AVAILABLE = True
+        result = text_translator.translate_text_googletrans("hello", "en", "zh-cn")
+
+        self.assertEqual(result, "你好")
+        call_kwargs = mock_translator.translate.call_args
+        self.assertEqual(call_kwargs.kwargs.get("dest") or call_kwargs[1].get("dest"), "zh-cn")
+
+    @patch("anytran.text_translator._get_googletrans_translator")
+    def test_zh_tw_unchanged(self, mock_get_translator):
+        """When target_lang is 'zh-tw', it should pass through unchanged."""
+        mock_translator = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "你好"
+        mock_translator.translate.return_value = mock_result
+        mock_get_translator.return_value = mock_translator
+
+        text_translator._GOOGLETRANS_AVAILABLE = True
+        result = text_translator.translate_text_googletrans("hello", "en", "zh-tw")
+
+        self.assertEqual(result, "你好")
+        call_kwargs = mock_translator.translate.call_args
+        self.assertEqual(call_kwargs.kwargs.get("dest") or call_kwargs[1].get("dest"), "zh-tw")
+
+
 if __name__ == "__main__":
     unittest.main()

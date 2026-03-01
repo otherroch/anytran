@@ -207,6 +207,9 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
     Returns:
         Translated text or None on failure
     """
+    # googletrans does not recognise bare 'zh'; map it to 'zh-cn' (Simplified Chinese)
+    if target_lang == "zh":
+        target_lang = "zh-cn"
     if not _GOOGLETRANS_AVAILABLE:
         if verbose:
             print("googletrans not installed. Install with: pip install googletrans==4.0.0-rc1")
