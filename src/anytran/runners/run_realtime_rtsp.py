@@ -203,9 +203,11 @@ def run_realtime_rtsp(
     finally:
         if chat_logger:
             chat_logger.close()
-        if text_file:
-            text_file.close()
-            # output_text_file removed
+        if scribe_file:
+            scribe_file.close()
+        if slate_file:
+            slate_file.close()
+        # output_text_file removed
         if scribe_audio_segments is not None:
             if len(scribe_audio_segments) > 0:
                 all_audio = np.concatenate(scribe_audio_segments)
