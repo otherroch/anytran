@@ -123,8 +123,16 @@ def run(selected_languages):
     from anytran.voice_matcher import extract_voice_features
 
     voices = []
+    unknown_languages = []
     for language_code in selected_languages:
-        voices.extend(VOICES_BY_LANGUAGE.get(language_code, []))
+        language_voices = VOICES_BY_LANGUAGE.get(language_code)
+        if language_voices is None:
+            unknown_languages.append(language_code)
+            continue
+        voices.extend(language_voices)
+
+    if unknown_languages:
+        print(f"Warning: unsupported language code(s): {', '.join(unknown_languages)}")
 
     results = []
     os.makedirs("voice_samples", exist_ok=True)
@@ -153,7 +161,11 @@ def run(selected_languages):
             }
         )
 
-    output_file = f"{selected_languages[0]}_voice_table.json" if len(selected_languages) == 1 else "voice_table.json"
+    output_file = (
+        f"{selected_languages[0]}_voice_table.json"
+        if len(selected_languages) == 1
+        else f"voice_table_{'_'.join(selected_languages)}.json"
+    )
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 

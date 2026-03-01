@@ -1,6 +1,8 @@
 import ast
 from pathlib import Path
 
+import voice_table_app
+
 
 VOICE_TABLE_APP = Path(__file__).resolve().parent.parent / "voice_table_app.py"
 
@@ -21,6 +23,7 @@ def test_includes_french_plus_ten_additional_languages():
     assert expected.issubset(set(voices_by_language))
 
 
-def test_languages_cli_argument_exists():
-    text = VOICE_TABLE_APP.read_text(encoding="utf-8")
-    assert "--languages" in text
+def test_language_selection_supports_all_and_defaults():
+    assert voice_table_app.get_selected_languages("fr,en") == ["fr", "en"]
+    assert voice_table_app.get_selected_languages("") == ["fr"]
+    assert len(voice_table_app.get_selected_languages("all")) >= 11
