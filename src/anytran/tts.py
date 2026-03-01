@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import subprocess
@@ -12,18 +13,90 @@ import tempfile
 import librosa
 import numpy as np
 import soundfile as sf
-from gtts import gTTS
-from playsound3 import playsound
-from pydub import AudioSegment
+try:
+    from gtts import gTTS
+except (ImportError, AttributeError):
+    gTTS = None
+try:
+    from playsound3 import playsound
+except ImportError:
+    playsound = None
+try:
+    from pydub import AudioSegment
+except ImportError:
+    AudioSegment = None
 
 from .voice_matcher import (
     extract_voice_features,
     select_best_piper_voice,
 )
 
-      
+
 _cached_matched_voice = None
-_piper_voice = None
+_piper_voice_cache = {}
+
+
+def _find_piper_config_path(model_path):
+    if not model_path:
+        return None
+    candidates = []
+    if model_path.endswith(".onnx"):
+        candidates.append(f"{model_path}.json")  # e.g., voice.onnx.json
+        base_without_ext = os.path.splitext(model_path)[0]
+        candidates.append(f"{base_without_ext}.json")
+    else:
+        candidates.append(f"{model_path}.json")
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _resolve_piper_sample_rate(voice, config_path):
+    def _try_get(obj, *attrs):
+        for attr in attrs:
+            if obj is None:
+                return None
+            obj = getattr(obj, attr, None)
+        return obj
+
+    candidates = [
+        getattr(voice, "sample_rate", None),
+        getattr(voice, "rate", None),
+        _try_get(getattr(voice, "config", None), "sample_rate"),
+        _try_get(getattr(voice, "config", None), "audio", "sample_rate"),
+    ]
+
+    for sr in candidates:
+        if isinstance(sr, (int, float)) and sr > 0:
+            return int(sr)
+
+    if config_path and os.path.isfile(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as cfg_fp:
+                cfg = json.load(cfg_fp)
+            audio = cfg.get("audio", {}) if isinstance(cfg, dict) else {}
+            sr = cfg.get("sample_rate") or audio.get("sample_rate") or audio.get("sampling_rate")
+            if isinstance(sr, (int, float)) and sr > 0:
+                return int(sr)
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
+    return 22050
+
+
+def _ensure_gtts_available(verbose=True):
+    missing = []
+    if gTTS is None:
+        missing.append("gTTS")
+    if AudioSegment is None:
+        missing.append("pydub")
+    if missing:
+        if verbose:
+            joined = ", ".join(missing)
+            print(f"[gTTS][ERROR] Missing dependencies: {joined}. Install them to use the gTTS backend.")
+        return False
+    return True
 
 def ensure_piper_voice_available(voice_model, verbose=False):
     """
@@ -68,11 +141,8 @@ def ensure_piper_voice_available(voice_model, verbose=False):
 
 
 def piper_tts(text, voice_model, output_wav, verbose=False):
+    global _piper_voice_cache
     
-    global _piper_voice
-    
-    #if verbose:
-    #    print(f"[TRACE] piper_tts called with voice_model={voice_model}, output_wav={output_wav}, verbose={verbose}")
     try:
         if not PIPER_PYTHON_AVAILABLE:
             print("[Piper][ERROR] Piper Python bindings are not installed. Please install piper-tts.")
@@ -88,9 +158,13 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
                 candidate = os.path.abspath(os.path.join("models", f"{voice_model}.onnx"))
                 if os.path.isfile(candidate):
                     model_path = candidate
+        config_path = _find_piper_config_path(model_path)
+        cache_key = (model_path, config_path)
         if verbose:
             print(f"[Piper] Using model path: {model_path}")
             print(f"[Piper] Model file exists: {os.path.isfile(model_path)}")
+            if config_path:
+                print(f"[Piper] Using config path: {config_path}")
         if not os.path.isfile(model_path):
             # Attempt to auto-download the voice model before failing
             if verbose:
@@ -110,23 +184,32 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
                 print(f"[Piper][ERROR] Model file does not exist: {model_path}")
                 return False
 
+        # Refresh config/cache info if we downloaded into a new path
+        config_path = _find_piper_config_path(model_path)
+        cache_key = (model_path, config_path)
+        if verbose and config_path:
+            print(f"[Piper] Using config path: {config_path}")
+
         # Use Piper Python API
         try:
-            voice = None
-            if _piper_voice is not None:
-                voice = _piper_voice
+            voice = _piper_voice_cache.get(cache_key)
+            if voice is not None:
                 if verbose:
                     print(f"[Piper] Reusing cached PiperVoice instance for model: {voice_model}")
             else:
-                voice = PiperVoice.load(model_path)
-                _piper_voice = voice
+                load_kwargs = {"config_path": config_path} if config_path else {}
+                voice = PiperVoice.load(model_path, **load_kwargs)
+                _piper_voice_cache[cache_key] = voice
                 if verbose:
                     print(f"[Piper] Loaded new PiperVoice instance for model: {voice_model}")
             if verbose:
                 print(f"[Piper] Synthesizing with PiperVoice.synthesize_wav...")
             import wave
             with wave.open(output_wav, "wb") as wav_file:
-                # PiperVoice.synthesize_wav sets the format automatically
+                sample_rate = _resolve_piper_sample_rate(voice, config_path)
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
                 voice.synthesize_wav(text, wav_file)
             if verbose:
                 print(f"[Piper] ✓ Synthesis successful with {voice_model} (Python API)")
@@ -182,6 +265,8 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
                     os.remove(tts_fp_path)
 
         if not use_piper:
+            if not _ensure_gtts_available():
+                return
             tts_lang = lang.split("-")[0]
             tts = gTTS(text=translated_text, lang=tts_lang)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tts_fp:
@@ -189,7 +274,10 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
                 tts_fp_path = tts_fp.name
             try:
                 if play_audio:
-                    playsound(tts_fp_path)
+                    if playsound is None:
+                        print("[PlaySound][WARN] playsound3 is not installed; skipping playback.")
+                    else:
+                        playsound(tts_fp_path)
                 if wav_file:
                     tts_audio = AudioSegment.from_mp3(tts_fp_path)
                     wav_data = tts_audio.set_frame_rate(rate).set_channels(1).set_sample_width(2)
@@ -202,19 +290,40 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
         print(f"TTS playback failed: {exc}")
 
 
-def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False):
+def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, cached_matched_voice=None, verbose=False):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
+    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
+    explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
     
     if not translated_text:
         return None
 
     tts_pcm = None
     try:
+        if use_piper and not explicit_voice_provided:
+            if cached_matched_voice is not None:
+                if verbose:
+                    print(f"[TTS] Using previously matched voice: {cached_matched_voice}")
+                piper_voice = cached_matched_voice
+            elif lang_base != "en":
+                neutral_features = {
+                    "mean_pitch": 150.0,
+                    "gender": "male",
+                    "pitch_std": 0.0,
+                    "zcr": 0.1,
+                    "brightness": 2000.0,
+
+                }
+                lang_voice = select_best_piper_voice(neutral_features, output_lang, verbose=verbose)
+                if lang_voice:
+                    if verbose:
+                        print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
+                    piper_voice = lang_voice
+
         # For non-English output, prefer gTTS over Piper if no explicit voice given
         # gTTS has better language support and voice diversity
-        lang_base = (output_lang or "en").split("-")[0]
-        piper_has_limited_voices = lang_base.lower() in ["it", "pt"]  # Languages with very limited Piper voices
+        piper_has_limited_voices = lang_base in ["it", "pt"]  # Languages with very limited Piper voices
         
         # If Piper is requested but language has limited voices, prefer gTTS instead
         if use_piper and piper_voice and piper_has_limited_voices:
@@ -266,6 +375,8 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                     os.remove(tts_fp_path)
 
         if not use_piper:
+            if not _ensure_gtts_available(verbose=verbose):
+                return None
             tts_lang = lang_base
             if verbose:
                 print(f"[TTS] Using gTTS with language: {tts_lang}")
@@ -289,6 +400,8 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                     print(f"[TTS] gTTS failed: {gtts_exc}")
                     print(f"[TTS] Falling back to English gTTS")
                 # Fallback to English if gTTS fails
+                if not _ensure_gtts_available(verbose=verbose):
+                    return None
                 try:
                     tts = gTTS(text=translated_text, lang="en")
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tts_fp:
@@ -321,7 +434,7 @@ def synthesize_tts_pcm_with_cloning(
         voice_backend="gtts",
         voice_model=None,
         voice_match=False,
-        verbose=False
+        verbose=False,
     ) :
     """
     Synthesize TTS with optional voice matching.
@@ -355,12 +468,9 @@ def synthesize_tts_pcm_with_cloning(
     Notes
     -----
     When ``voice_match`` is enabled, this function performs voice matching
-    only once per process lifetime. The first call that requires automatic
-    voice matching selects the best Piper voice based on the input voice
-    features and caches that selection in the module-level
-    ``_cached_matched_voice`` variable. Subsequent calls in the same process
-    reuse the cached match instead of re-running voice matching, unless the
-    process is restarted.
+    only once per process lifetime when reference audio is provided. The
+    matched voice is stored in a module-level cache and reused for later
+    calls to avoid repeated analysis.
     """ 
     global _cached_matched_voice
     use_piper = voice_backend == "piper"
@@ -436,12 +546,13 @@ def synthesize_tts_pcm_with_cloning(
                     piper_voice = lang_voice
 
         # Standard Piper TTS or gTTS
-        return synthesize_tts_pcm(
+        tts_pcm = synthesize_tts_pcm(
             translated_text, rate, output_lang,
             voice_backend="piper" if use_piper else "gtts",
             voice_model=piper_voice,
             verbose=verbose,
         )
+        return tts_pcm
         
     except Exception as exc:
         if verbose:

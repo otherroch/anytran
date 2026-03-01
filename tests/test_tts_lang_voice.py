@@ -6,6 +6,8 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
+
 
 def _setup_stubs():
     """Stub all heavy external packages needed to import anytran.tts."""
@@ -166,3 +168,87 @@ def test_synthesize_tts_pcm_with_cloning_english_output_keeps_default_voice(tmp_
     assert used_voice.get("voice_model") == "en_US-lessac-medium", (
         "English output should keep the default English voice."
     )
+
+
+def test_synthesize_tts_pcm_auto_selects_language_voice(tmp_path, monkeypatch):
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+
+    table = [
+        {"onnx_file": "en_US-lessac-medium.onnx", "pitch": 120, "gender": "male"},
+        {"onnx_file": "fr_FR-tom-medium.onnx", "pitch": 115, "gender": "male"},
+    ]
+    table_path = tmp_path / "voice_table.json"
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+
+    import anytran.voice_matcher as voice_matcher
+
+    monkeypatch.setattr(voice_matcher, "VOICE_TABLE_JSON_PATH", table_path)
+    voice_matcher._load_piper_voices.cache_clear()
+    monkeypatch.setattr(_tts_module, "select_best_piper_voice", voice_matcher.select_best_piper_voice)
+
+    used_voice = {}
+
+    def fake_piper_tts(_text, voice_model, _output_wav, verbose=False):
+        used_voice["voice_model"] = voice_model
+        return True
+
+    def fake_sf_read(_path):
+        audio = np.ones(1600, dtype=np.float32) * 0.1
+        return audio, 16000
+
+    monkeypatch.setattr(_tts_module, "piper_tts", fake_piper_tts)
+    monkeypatch.setattr(_tts_module.sf, "read", fake_sf_read, raising=False)
+
+    pcm = _tts_module.synthesize_tts_pcm(
+        translated_text="Une tenue appropriée",
+        rate=16000,
+        output_lang="fr",
+        voice_backend="piper",
+        voice_model="en_US-lessac-medium",
+        verbose=False,
+    )
+
+    assert used_voice.get("voice_model") == "fr_FR-tom-medium", (
+        "synthesize_tts_pcm should auto-select a French Piper voice when none is explicitly provided."
+    )
+    assert pcm is not None, "Piper synthesis should still return audio data after auto-selection."
+
+
+def test_synthesize_tts_pcm_respects_explicit_voice(tmp_path, monkeypatch):
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+
+    table_path = tmp_path / "voice_table.json"
+    table_path.write_text(json.dumps([{"onnx_file": "fr_FR-tom-medium.onnx", "pitch": 115, "gender": "male"}]), encoding="utf-8")
+
+    import anytran.voice_matcher as voice_matcher
+
+    monkeypatch.setattr(voice_matcher, "VOICE_TABLE_JSON_PATH", table_path)
+    voice_matcher._load_piper_voices.cache_clear()
+    monkeypatch.setattr(_tts_module, "select_best_piper_voice", voice_matcher.select_best_piper_voice)
+
+    used_voice = {}
+
+    def fake_piper_tts(_text, voice_model, _output_wav, verbose=False):
+        used_voice["voice_model"] = voice_model
+        return True
+
+    def fake_sf_read(_path):
+        audio = np.ones(1600, dtype=np.float32) * 0.1
+        return audio, 16000
+
+    monkeypatch.setattr(_tts_module, "piper_tts", fake_piper_tts)
+    monkeypatch.setattr(_tts_module.sf, "read", fake_sf_read, raising=False)
+
+    pcm = _tts_module.synthesize_tts_pcm(
+        translated_text="Tenue",
+        rate=16000,
+        output_lang="fr",
+        voice_backend="piper",
+        voice_model="fr_FR-tom-medium",
+        verbose=False,
+    )
+
+    assert used_voice.get("voice_model") == "fr_FR-tom-medium", (
+        "Explicit Piper voices must not be overridden by language-aware auto-selection."
+    )
+    assert pcm is not None

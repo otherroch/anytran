@@ -73,5 +73,53 @@
     "onnx_file": "de_DE-eva_k-x_low.onnx",
     "pitch": 190,
     "gender": "female"
+  },
+  {
+    "onnx_file": "it_IT-paola-medium.onnx",
+    "pitch": 232.44,
+    "pitch_std": 41.68,
+    "zcr": 0.1119,
+    "brightness": 1874.22,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "it_IT-riccardo-x_low.onnx",
+    "pitch": 138.52,
+    "pitch_std": 29.2,
+    "zcr": 0.1122,
+    "brightness": 1372.75,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "zh_CN-chaowen-medium.onnx",
+    "pitch": 142.22,
+    "pitch_std": 47.7,
+    "zcr": 0.1212,
+    "brightness": 1884.28,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "zh_CN-huayan-medium.onnx",
+    "pitch": 197.59,
+    "pitch_std": 51.13,
+    "zcr": 0.0898,
+    "brightness": 1680.21,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "zh_CN-huayan-x_low.onnx",
+    "pitch": 202.4,
+    "pitch_std": 55.73,
+    "zcr": 0.1168,
+    "brightness": 1653.17,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "zh_CN-xiao_ya-medium.onnx",
+    "pitch": 232.88,
+    "pitch_std": 84.16,
+    "zcr": 0.1396,
+    "brightness": 2592.64,
+    "gender": "female"
   }
 ]
