@@ -1,29 +1,51 @@
-import ast
-from pathlib import Path
+import json
 
 import voice_table_app
-
-
-VOICE_TABLE_APP = Path(__file__).resolve().parent.parent / "voice_table_app.py"
-
-
-def _get_voices_by_language():
-    tree = ast.parse(VOICE_TABLE_APP.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "VOICES_BY_LANGUAGE":
-                    return ast.literal_eval(node.value)
-    raise AssertionError("VOICES_BY_LANGUAGE not found")
-
-
-def test_includes_french_plus_ten_additional_languages():
-    voices_by_language = _get_voices_by_language()
-    expected = {"fr", "en", "de", "es", "it", "pt", "ru", "pl", "nl", "ar", "zh"}
-    assert expected.issubset(set(voices_by_language))
 
 
 def test_language_selection_supports_all_and_defaults():
     assert voice_table_app.get_selected_languages("fr,en") == ["fr", "en"]
     assert voice_table_app.get_selected_languages("") == ["fr"]
-    assert len(voice_table_app.get_selected_languages("all")) >= 11
+    assert voice_table_app.get_selected_languages("all") == ["all"]
+
+
+def test_collect_voices_for_languages_accepts_family_and_full_code():
+    catalog = {
+        "fr_FR-gilles-low": {
+            "language": {"family": "fr", "code": "fr_FR"},
+            "files": {"fr/fr_FR/gilles/low/fr_FR-gilles-low.onnx": {}},
+        },
+        "ca_ES-upc_ona-x_low": {
+            "language": {"family": "ca", "code": "ca_ES"},
+            "files": {"ca/ca_ES/upc_ona/x_low/ca_ES-upc_ona-x_low.onnx": {}},
+        },
+    }
+
+    voices, unknown = voice_table_app.collect_voices_for_languages(catalog, ["fr", "ca_es"])
+
+    assert unknown == []
+    assert {entry["onnx_file"] for entry in voices} == {
+        "fr_FR-gilles-low.onnx",
+        "ca_ES-upc_ona-x_low.onnx",
+    }
+
+
+def test_append_unique_entries_preserves_existing(tmp_path):
+    output_file = tmp_path / "voice_table.json"
+    output_file.write_text(
+        json.dumps([{"onnx_file": "fr_FR-gilles-low.onnx", "pitch": 110, "gender": "male"}]),
+        encoding="utf-8",
+    )
+
+    merged = voice_table_app.append_unique_entries(
+        str(output_file),
+        [
+            {"onnx_file": "fr_FR-gilles-low.onnx", "pitch": 120, "gender": "male"},
+            {"onnx_file": "fr_FR-siwis-low.onnx", "pitch": 190, "gender": "female"},
+        ],
+    )
+
+    assert merged == [
+        {"onnx_file": "fr_FR-gilles-low.onnx", "pitch": 110, "gender": "male"},
+        {"onnx_file": "fr_FR-siwis-low.onnx", "pitch": 190, "gender": "female"},
+    ]

@@ -3,108 +3,116 @@ import argparse
 import requests
 import json
 
-VOICES_BY_LANGUAGE = {
-    "fr": [
-        {
-            "name": "fr_FR-gilles-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/gilles/low/samples/speaker_0.mp3",
-        },
-        {
-            "name": "fr_FR-mls_1840-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/mls_1840/low/samples/speaker_0.mp3",
-        },
-        {
-            "name": "fr_FR-mls-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/mls/low/samples/speaker_0.mp3",
-        },
-        {
-            "name": "fr_FR-siwis-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/low/samples/speaker_0.mp3",
-        },
-        {
-            "name": "fr_FR-tom-medium",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/tom/medium/samples/speaker_0.mp3",
-        },
-        {
-            "name": "fr_FR-upmc-medium",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/upmc/medium/samples/speaker_0.mp3",
-        },
-    ],
-    "en": [
-        {
-            "name": "en_US-lessac-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/samples/speaker_0.mp3",
-        }
-    ],
-    "de": [
-        {
-            "name": "de_DE-thorsten-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/low/samples/speaker_0.mp3",
-        }
-    ],
-    "es": [
-        {
-            "name": "es_ES-mls_9972-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/mls_9972/low/samples/speaker_0.mp3",
-        }
-    ],
-    "it": [
-        {
-            "name": "it_IT-riccardo-x_low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/riccardo/x_low/samples/speaker_0.mp3",
-        }
-    ],
-    "pt": [
-        {
-            "name": "pt_BR-edresson-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/edresson/low/samples/speaker_0.mp3",
-        }
-    ],
-    "ru": [
-        {
-            "name": "ru_RU-ruslan-medium",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/ruslan/medium/samples/speaker_0.mp3",
-        }
-    ],
-    "pl": [
-        {
-            "name": "pl_PL-darkman-medium",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/pl/pl_PL/darkman/medium/samples/speaker_0.mp3",
-        }
-    ],
-    "nl": [
-        {
-            "name": "nl_NL-mls_5809-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/nl/nl_NL/mls_5809/low/samples/speaker_0.mp3",
-        }
-    ],
-    "ar": [
-        {
-            "name": "ar_JO-kareem-low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ar/ar_JO/kareem/low/samples/speaker_0.mp3",
-        }
-    ],
-    "zh": [
-        {
-            "name": "zh_CN-huayan-x_low",
-            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/x_low/samples/speaker_0.mp3",
-        }
-    ],
-}
+VOICES_JSON_URLS = (
+    "https://huggingface.co/rhasspy/piper-voices/raw/main/voices.json",
+    "https://raw.githubusercontent.com/LouisGameDev/piper-voices/main/voices.json",
+)
+VOICES_RESOLVE_BASE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
 
 def download_mp3(url, filename):
-    r = requests.get(url)
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
     with open(filename, "wb") as f:
         f.write(r.content)
+
+
+def load_voices_catalog():
+    errors = []
+    for url in VOICES_JSON_URLS:
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Could not fetch Piper voices catalog:\n" + "\n".join(errors))
+
+
+def collect_voices_for_languages(catalog, selected_languages):
+    selected = {lang.lower() for lang in selected_languages}
+    all_families = {
+        voice.get("language", {}).get("family", "").lower()
+        for voice in catalog.values()
+        if voice.get("language", {}).get("family")
+    }
+    if selected == {"all"}:
+        selected = all_families
+
+    voices = []
+    for voice in catalog.values():
+        language = voice.get("language", {})
+        family = language.get("family", "").lower()
+        code = language.get("code", "").lower()
+        if family not in selected and code not in selected:
+            continue
+        for file_path in voice.get("files", {}):
+            if not file_path.endswith(".onnx"):
+                continue
+            voice_dir = os.path.dirname(file_path)
+            onnx_file = os.path.basename(file_path)
+            voices.append(
+                {
+                    "onnx_file": onnx_file,
+                    "name": os.path.splitext(onnx_file)[0],
+                    "url": f"{VOICES_RESOLVE_BASE_URL}/{voice_dir}/samples/speaker_0.mp3",
+                }
+            )
+            break
+
+    unknown_languages = sorted(
+        requested
+        for requested in selected
+        if requested not in all_families
+        and requested not in {
+            voice.get("language", {}).get("code", "").lower()
+            for voice in catalog.values()
+        }
+    )
+    return voices, unknown_languages
+
+
+def load_existing_entries(output_file):
+    if not os.path.exists(output_file):
+        return []
+    try:
+        with open(output_file, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, list) else []
+    except Exception:
+        return []
+
+
+def append_unique_entries(output_file, new_entries):
+    existing_entries = load_existing_entries(output_file)
+    existing_by_onnx = {
+        entry.get("onnx_file"): entry
+        for entry in existing_entries
+        if isinstance(entry, dict) and entry.get("onnx_file")
+    }
+    for entry in new_entries:
+        onnx_file = entry.get("onnx_file")
+        if onnx_file and onnx_file not in existing_by_onnx:
+            existing_entries.append(entry)
+            existing_by_onnx[onnx_file] = entry
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(existing_entries, f, indent=2, ensure_ascii=False)
+    return existing_entries
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--language",
         "--languages",
+        dest="language",
         default="fr",
         help="Comma-separated language codes to process (default: fr). Use 'all' for every configured language.",
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="Output JSON file path. Existing files are appended with new unique entries.",
     )
     return parser.parse_args()
 
@@ -114,25 +122,19 @@ def get_selected_languages(raw_languages):
     if not requested_languages:
         return ["fr"]
     if requested_languages == ["all"]:
-        return list(VOICES_BY_LANGUAGE.keys())
+        return ["all"]
     return requested_languages
 
 
-def run(selected_languages):
+def run(selected_languages, output_file):
     import librosa
     from anytran.voice_matcher import extract_voice_features
 
     if not selected_languages:
         selected_languages = ["fr"]
 
-    voices = []
-    unknown_languages = []
-    for language_code in selected_languages:
-        language_voices = VOICES_BY_LANGUAGE.get(language_code)
-        if language_voices is None:
-            unknown_languages.append(language_code)
-            continue
-        voices.extend(language_voices)
+    catalog = load_voices_catalog()
+    voices, unknown_languages = collect_voices_for_languages(catalog, selected_languages)
 
     if unknown_languages:
         print(f"Warning: unsupported language code(s): {', '.join(unknown_languages)}")
@@ -146,7 +148,7 @@ def run(selected_languages):
                 download_mp3(v["url"], mp3_file)
             except Exception as e:
                 print(f"Error downloading {v['name']}: {e}")
-                results.append({"voice": v["name"], "pitch": 0, "gender": "download_error"})
+                results.append({"onnx_file": v["onnx_file"], "pitch": 0, "gender": "download_error"})
                 continue
         try:
             y, sr = librosa.load(mp3_file, sr=None)
@@ -157,24 +159,17 @@ def run(selected_languages):
         features = extract_voice_features(y, sr)
         results.append(
             {
-                v["name"]: {
-                    "pitch": round(features["mean_pitch"], 2),
-                    "gender": features["gender"],
-                }
+                "onnx_file": v["onnx_file"],
+                "pitch": round(features["mean_pitch"], 2),
+                "gender": features["gender"],
             }
         )
 
-    output_file = (
-        f"{selected_languages[0]}_voice_table.json"
-        if len(selected_languages) == 1
-        else f"voice_table_{'_'.join(selected_languages)}.json"
-    )
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+    saved_results = append_unique_entries(output_file, results)
 
-    print(json.dumps(results, indent=2, ensure_ascii=False))
+    print(json.dumps(saved_results, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run(get_selected_languages(args.languages))
+    run(get_selected_languages(args.language), args.output)
