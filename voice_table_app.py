@@ -122,6 +122,9 @@ def run(selected_languages):
     import librosa
     from anytran.voice_matcher import extract_voice_features
 
+    if not selected_languages:
+        selected_languages = ["fr"]
+
     voices = []
     unknown_languages = []
     for language_code in selected_languages:
