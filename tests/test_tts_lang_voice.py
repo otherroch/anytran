@@ -117,7 +117,7 @@ def test_voice_match_runs_per_language(monkeypatch):
 
     calls = []
 
-    def fake_extract(audio, sample_rate=16000, verbose=False):
+    def fake_extract(reference_audio, sample_rate=16000, verbose=False):
         calls.append(("extract", sample_rate))
         return {"mean_pitch": 120.0, "gender": "male", "pitch_std": 0.0, "zcr": 0.1, "brightness": 2000.0}
 

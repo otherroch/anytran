@@ -524,6 +524,7 @@ def synthesize_tts_pcm_with_cloning(
                 if verbose:
                     print(f"Using cached matched voice for {lang_base}: {matched_cached_voice}")
                 piper_voice = matched_cached_voice
+                use_piper = True
         elif voice_match and reference_audio is not None and explicit_voice_provided:
             if verbose:
                 print("Explicit voice provided (--voice-model), skipping --voice-match")
