@@ -294,7 +294,7 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
 def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, cached_matched_voice=None, verbose=False):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
-    # Extract base language code for language-aware selection in this function
+    # Extract base language code for per-language cache lookups and language-aware voice selection
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
     
@@ -516,7 +516,6 @@ def synthesize_tts_pcm_with_cloning(
                         print("==========================================")
                     piper_voice = matched_voice
                     _cached_matched_voice[lang_base] = matched_voice
-                    use_piper = True
                 else:
                     if verbose:
                         print("✗ No suitable voice found, using default")
@@ -525,7 +524,6 @@ def synthesize_tts_pcm_with_cloning(
                 if verbose:
                     print(f"Using cached matched voice for {lang_base}: {matched_cached_voice}")
                 piper_voice = matched_cached_voice
-                use_piper = True
         elif voice_match and reference_audio is not None and explicit_voice_provided:
             if verbose:
                 print("Explicit voice provided (--voice-model), skipping --voice-match")
