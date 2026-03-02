@@ -90,6 +90,31 @@ anytran --rtsp rtsp://camera1 \
   --voice-match
 ```
 
+## Regenerating the Voice Table
+
+The voice table JSON file (`src/anytran/voice_table.json`) stores pre-computed voice features for available Piper TTS voices. You can regenerate it using the built-in `--voice-table-gen` subcommand:
+
+```bash
+# Regenerate for French only (default)
+anytran --voice-table-gen
+
+# Regenerate for French and English
+anytran --voice-table-gen --voice-table-lang fr,en
+
+# Regenerate for all supported languages
+anytran --voice-table-gen --voice-table-lang all
+
+# Write to a custom path
+anytran --voice-table-gen --voice-table-lang fr,en --voice-table-output ./my_voice_table.json
+```
+
+**When to regenerate:**
+- After installing new Piper voice models
+- When you need to add support for additional languages
+- If the voice table file becomes stale or corrupted
+
+See [OPTIONS.md](OPTIONS.md) for the full reference on `--voice-table-gen`, `--voice-table-lang`, and `--voice-table-output`.
+
 ## Technical Details
 
 ### Voice Feature Extraction
