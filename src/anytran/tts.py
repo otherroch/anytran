@@ -225,6 +225,9 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
 
 
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
+    # lang_base is used for both voice-matching and language-aware fallback paths; compute once
+    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
+    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
 
@@ -474,6 +477,7 @@ def synthesize_tts_pcm_with_cloning(
     calls to avoid repeated analysis.
     """ 
     global _cached_matched_voice, _cached_voice_features
+    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
 
@@ -485,8 +489,7 @@ def synthesize_tts_pcm_with_cloning(
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
         explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
-        lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
-  
+
         cached_auto_match_applicable = voice_match and reference_audio is not None and not explicit_voice_provided
         if cached_auto_match_applicable:
             matched_cached_voice = _cached_matched_voice.get(lang_base)
@@ -534,7 +537,8 @@ def synthesize_tts_pcm_with_cloning(
         # Language-aware automatic voice selection:
         # When Piper is requested with the default English voice but a non-English
         # output language, automatically select the best available Piper voice for
-        # that language so the synthesized speech sounds natural.
+        # that language so the synthesized speech sounds natural. This path is
+        # skipped when a matched voice already exists for the target language.
         if use_piper and not explicit_voice_provided:
             if lang_base not in _cached_matched_voice:
                 if lang_base != "en":
