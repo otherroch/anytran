@@ -362,13 +362,13 @@ def run_web_server(
             for (let i = 0; i < pcm16.length; i++) {
                 channelData[i] = pcm16[i] / 32768;
             }
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
+            const bufferSource = audioContext.createBufferSource();
+            bufferSource.buffer = audioBuffer;
+            bufferSource.connect(audioContext.destination);
             if (nextAudioTime < audioContext.currentTime) {
                 nextAudioTime = audioContext.currentTime;
             }
-            source.start(nextAudioTime);
+            bufferSource.start(nextAudioTime);
             nextAudioTime += audioBuffer.duration;
         }
 
