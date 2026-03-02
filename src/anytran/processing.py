@@ -471,7 +471,7 @@ def process_audio_chunk(
             print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
     
     # Synthesize slate audio (final output)
-    if final_text and slate_tts_segments is not None:
+    if final_text and final_text.strip() and slate_tts_segments is not None:
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             final_text,
