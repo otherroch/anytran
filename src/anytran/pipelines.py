@@ -119,6 +119,8 @@ def _run_web_pipeline(args, config):
         scribe_backend=config["scribe_backend"],
         dedup=config["dedup"],
         lang_prefix=config["lang_prefix"],
+        voice_backend=config["voice_backend"],
+        voice_model=config["voice_model"],
     )
     return 0
 

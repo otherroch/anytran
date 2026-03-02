@@ -417,5 +417,29 @@ class TestTranConverge(unittest.TestCase):
         self.assertEqual(mock_rfi.call_count, 5)
 
 
+class TestWebPipelineVoiceBackend(unittest.TestCase):
+    """Ensure web pipeline passes voice backend settings to the server."""
+
+    def test_web_pipeline_uses_configured_voice_backend(self):
+        args = types.SimpleNamespace(
+            web_host="0.0.0.0",
+            web_port=8443,
+            web_ssl_cert=None,
+            web_ssl_key=None,
+        )
+        config = _make_config("auto", "fr", slate_text=None)
+        config["voice_backend"] = "piper"
+        config["voice_model"] = "fr_test_voice"
+
+        _web_server.run_web_server.reset_mock()
+
+        _cli_new._run_web_pipeline(args, config)
+
+        _web_server.run_web_server.assert_called_once()
+        call_kwargs = _web_server.run_web_server.call_args.kwargs
+        self.assertEqual(call_kwargs.get("voice_backend"), "piper")
+        self.assertEqual(call_kwargs.get("voice_model"), "fr_test_voice")
+
+
 if __name__ == "__main__":
     unittest.main()
