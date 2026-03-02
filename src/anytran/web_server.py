@@ -76,6 +76,36 @@ def _serialize_tts_segments(segments, rate):
     return payloads
 
 
+def _build_uvicorn_signal_handler(server):
+    """Return (handler, state) tuple for uvicorn signal handling with loop stop."""
+    state = {"shutdown_requested": False, "loop_stop_scheduled": False}
+
+    def signal_handler(sig, frame):
+        if state["shutdown_requested"]:
+            return
+        state["shutdown_requested"] = True
+        print("\nStopping web server...", flush=True)
+        server.should_exit = True
+        server.force_exit = True
+        if hasattr(server, "handle_exit"):
+            try:
+                server.handle_exit(sig, frame)
+            except Exception:
+                pass
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Wake up and stop the loop so uvicorn can observe should_exit flag
+                loop.call_soon_threadsafe(lambda: None)
+                if not state["loop_stop_scheduled"]:
+                    state["loop_stop_scheduled"] = True
+                    loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+
+    return signal_handler, state
+
+
 def _process_web_audio_chunk(
     audio_segment,
     rate,
@@ -105,6 +135,7 @@ def _process_web_audio_chunk(
 ):
     """Process a web audio chunk and collect any TTS audio payloads."""
     slate_tts_segments = []
+    effective_voice_lang = None if langswap_enabled else voice_lang
     translated_text = process_audio_chunk(
         audio_segment,
         rate,
@@ -131,7 +162,7 @@ def _process_web_audio_chunk(
         langswap_output_lang=langswap_output_lang,
         slate_tts_segments=slate_tts_segments,
         voice_match=voice_match,
-        voice_lang=voice_lang,
+        voice_lang=effective_voice_lang,
     )
     return translated_text, _serialize_tts_segments(slate_tts_segments, rate)
 
@@ -763,28 +794,7 @@ def run_web_server(
     )
     server = uvicorn.Server(config)
 
-    shutdown_requested = False
-
-    def signal_handler(sig, frame):
-        nonlocal shutdown_requested
-        if shutdown_requested:
-            return
-        shutdown_requested = True
-        print("\nStopping web server...", flush=True)
-        server.should_exit = True
-        server.force_exit = True
-        if hasattr(server, "handle_exit"):
-            try:
-                server.handle_exit(sig, frame)
-            except Exception:
-                pass
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Wake up the loop so uvicorn can observe should_exit flag
-                loop.call_soon_threadsafe(lambda: None)
-        except Exception:
-            pass
+    signal_handler, handler_state = _build_uvicorn_signal_handler(server)
 
     signal.signal(signal.SIGINT, signal_handler)
     if hasattr(signal, "SIGTERM"):

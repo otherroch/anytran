@@ -121,6 +121,81 @@ class TestWebServerErrorHandling(unittest.TestCase):
         self.assertTrue(server.force_exit)
         self.assertEqual(server.handle_exit_called, 1)
 
+    def test_signal_handler_stops_loop_once(self):
+        """Signal handler should wake and stop a running loop."""
+        class FakeLoop:
+            def __init__(self):
+                self.calls = []
+            def is_running(self):
+                return True
+            def call_soon_threadsafe(self, fn):
+                self.calls.append(fn)
+                # Execute immediately for test visibility
+                fn()
+            def stop(self):
+                self.calls.append("stop")
+
+        class FakeServer:
+            def __init__(self):
+                self.should_exit = False
+                self.force_exit = False
+                self.handle_exit_called = 0
+            def handle_exit(self, *args, **kwargs):
+                self.handle_exit_called += 1
+
+        loop = FakeLoop()
+        server = FakeServer()
+        with patch("anytran.web_server.asyncio.get_event_loop", return_value=loop):
+            handler, state = web_server._build_uvicorn_signal_handler(server)
+            handler("sig", None)
+            handler("sig", None)  # second call should be no-op
+
+        self.assertTrue(server.should_exit)
+        self.assertTrue(server.force_exit)
+        self.assertEqual(server.handle_exit_called, 1)
+        # First call schedules lambda + stop, second call should not add more
+        self.assertIn("stop", loop.calls)
+        self.assertGreaterEqual(len(loop.calls), 2)
+        self.assertTrue(state["shutdown_requested"])
+        self.assertTrue(state["loop_stop_scheduled"])
+
+    def test_process_chunk_uses_langswap_voice_lang_override(self):
+        """LangSwap should ignore a fixed voice_lang and let processing choose per-language."""
+        captured = {}
+        def fake_process_audio_chunk(*args, **kwargs):
+            captured["voice_lang"] = kwargs.get("voice_lang")
+            return {"output": "ok", "final_lang": "fr"}
+        with patch("anytran.web_server.process_audio_chunk", new=fake_process_audio_chunk):
+            dummy_audio = np.zeros(16000, dtype=np.float32)
+            web_server._process_web_audio_chunk(
+                audio_segment=dummy_audio,
+                rate=16000,
+                current_input_lang="fr",
+            current_output_lang="en",
+            magnitude_threshold=0.01,
+            model=None,
+            verbose=False,
+            mqtt_broker=None,
+            mqtt_port=1883,
+            mqtt_username=None,
+            mqtt_password=None,
+            mqtt_topic=None,
+            stream_id="web",
+            scribe_vad=False,
+            voice_backend="piper",
+            voice_model="en_US-lessac-medium",
+            timers=False,
+            timing_stats=None,
+            scribe_backend="auto",
+            text_translation_target="en",
+            langswap_enabled=True,
+            langswap_input_lang="fr",
+            langswap_output_lang="en",
+            voice_match=True,
+            voice_lang="en",
+        )
+        assert captured["voice_lang"] is None
+
     def test_windows_socket_error_suppression(self):
         """Test that ConnectionResetError is properly suppressed on Windows."""
         # Import the function from web_server module
