@@ -473,7 +473,7 @@ def synthesize_tts_pcm_with_cloning(
     matched voice is stored in a module-level cache and reused for later
     calls to avoid repeated analysis.
     """ 
-    global _cached_matched_voice
+    global _cached_matched_voice, _cached_voice_features
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
 
@@ -498,7 +498,6 @@ def synthesize_tts_pcm_with_cloning(
                     print(f"Analyzing input voice characteristics...")
                 
                 # Extract voice features once per process
-                global _cached_voice_features
                 if _cached_voice_features is None:
                     _cached_voice_features = extract_voice_features(reference_audio, reference_sample_rate, verbose=True if verbose else False)
                 features = _cached_voice_features
