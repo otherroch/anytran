@@ -294,6 +294,7 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
 def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, cached_matched_voice=None, verbose=False):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
+    # Shared language code for both voice-match caching and language-aware fallback
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
     
