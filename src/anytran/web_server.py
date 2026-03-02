@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import signal
+import asyncio
 
 import numpy as np
 
@@ -762,18 +763,33 @@ def run_web_server(
     )
     server = uvicorn.Server(config)
 
+    shutdown_requested = False
+
     def signal_handler(sig, frame):
+        nonlocal shutdown_requested
+        if shutdown_requested:
+            return
+        shutdown_requested = True
         print("\nStopping web server...", flush=True)
         server.should_exit = True
         server.force_exit = True
+        if hasattr(server, "handle_exit"):
+            try:
+                server.handle_exit(sig, frame)
+            except Exception:
+                pass
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(lambda: None)
+        except Exception:
+            pass
 
     signal.signal(signal.SIGINT, signal_handler)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, signal_handler)
 
     _install_windows_ctrl_handler(signal_handler)
-
-    import asyncio
 
     def suppress_windows_socket_errors(loop, context):
         """

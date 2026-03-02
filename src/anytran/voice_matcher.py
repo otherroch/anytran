@@ -84,15 +84,15 @@ def extract_voice_features(audio_data, sample_rate=16000, verbose=False):
     
     # Gender estimation based on pitch
     # Typical ranges: Male 85-200 Hz, Female 165-255 Hz
-    # Uses brightness as tiebreaker for ambiguous range (150-190 Hz)
+    # Uses brightness as tiebreaker for ambiguous range (150-210 Hz)
     if mean_pitch < 150:
         gender = "male"
         if mean_pitch < 100:
             voice_type = "male_deep"
         else:
             voice_type = "male_mid"
-    elif mean_pitch < 190:
-        # Ambiguous range (150-190 Hz), use brightness as secondary indicator
+    elif mean_pitch < 210:
+        # Ambiguous range (150-210 Hz), use brightness as secondary indicator
         # High brightness = more likely female, low = more likely male
         if mean_brightness > 2500:
             gender = "female"
@@ -102,7 +102,7 @@ def extract_voice_features(audio_data, sample_rate=16000, verbose=False):
             voice_type = "male_mid"
     else:
         gender = "female"
-        if mean_pitch > 220:
+        if mean_pitch > 230:
             voice_type = "female_high"
         else:
             voice_type = "female_mid"

@@ -89,6 +89,38 @@ class TestWebServerErrorHandling(unittest.TestCase):
         self.assertEqual("wrapped", web_server._WINDOWS_CTRL_HANDLER)
         kernel32.SetConsoleCtrlHandler.assert_called_once_with("wrapped", True)
 
+    def test_signal_handler_idempotent(self):
+        """Signal handler should only request shutdown once."""
+        class DummyServer:
+            def __init__(self):
+                self.should_exit = False
+                self.force_exit = False
+                self.handle_exit_called = 0
+            def handle_exit(self, *args, **kwargs):
+                self.handle_exit_called += 1
+
+        server = DummyServer()
+        shutdowns = {"count": 0}
+        def make_handler():
+            shutdown_requested = False
+            def _handler(sig, frame):
+                nonlocal shutdown_requested
+                if shutdown_requested:
+                    return
+                shutdown_requested = True
+                shutdowns["count"] += 1
+                server.should_exit = True
+                server.force_exit = True
+                server.handle_exit(sig, frame)
+            return _handler
+        handler = make_handler()
+        handler(None, None)
+        handler(None, None)
+        self.assertEqual(shutdowns["count"], 1)
+        self.assertTrue(server.should_exit)
+        self.assertTrue(server.force_exit)
+        self.assertEqual(server.handle_exit_called, 1)
+
     def test_windows_socket_error_suppression(self):
         """Test that ConnectionResetError is properly suppressed on Windows."""
         # Import the function from web_server module

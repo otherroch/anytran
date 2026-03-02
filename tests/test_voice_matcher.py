@@ -2,6 +2,7 @@ import json
 import importlib.util
 import builtins
 from pathlib import Path
+import numpy as np
 
 
 def _load_voice_matcher_module():
@@ -96,3 +97,29 @@ def test_voice_table_json_loaded_once(tmp_path, monkeypatch):
     voice_matcher.select_best_piper_voice({"mean_pitch": 121, "gender": "male"}, language="en")
 
     assert open_calls["count"] == 1
+
+
+def test_gender_classification_handles_high_male_pitch(monkeypatch):
+    voice_matcher = _load_voice_matcher_module()
+    # Provide minimal librosa.feature functions to avoid heavy dependency behavior in test
+    class _DummyLibrosa:
+        @staticmethod
+        def yin(*args, **kwargs):
+            return np.array([205.0])
+
+        class feature:
+            @staticmethod
+            def zero_crossing_rate(y):
+                return [[0.05]]
+
+            @staticmethod
+            def spectral_centroid(y, sr):
+                return [[1500.0]]
+
+    monkeypatch.setattr(voice_matcher, "librosa", _DummyLibrosa)
+    # Simulate a male-like voice around 205 Hz with low brightness so it should not be forced to female
+    sample = np.sin(2 * np.pi * 205 * np.linspace(0, 1, 16000, endpoint=False)).astype(np.float32)
+    features = voice_matcher.extract_voice_features(sample, sample_rate=16000, verbose=False)
+    # Threshold adjustments should classify as male (male_mid) for ~205 Hz
+    assert 200 <= features["mean_pitch"] <= 210
+    assert features["gender"] == "male"
