@@ -396,7 +396,7 @@ def process_audio_chunk(
     
     # Determine the final output language:
     # 1. If Stage 2 ran, use the translation target
-    # 2. If a translation target was set (even when Stage 2 is skipped because target matches the input or is English), prefer it
+    # 2. If a translation target was set (even when Stage 2 is skipped because target language equals the input language or is English), prefer it
     # 3. Otherwise, use the detected language
     if stage2_ran:
         # Stage 2 translation happened, output is in text_translation_target
