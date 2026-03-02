@@ -396,13 +396,13 @@ def process_audio_chunk(
     
     # Determine the final output language:
     # 1. If Stage 2 ran, use the translation target
-    # 2. If LangSwap changed the target, use the new target (even if Stage 2 didn't run)
+    # 2. If a translation target was set (including English), prefer it
     # 3. Otherwise, use the detected language
     if stage2_ran:
         # Stage 2 translation happened, output is in text_translation_target
         final_text_lang = text_translation_target
-    elif langswap_changed_target:
-        # LangSwap changed the target (even if Stage 2 didn't run because target is English)
+    elif text_translation_target:
+        # Translation skipped (e.g., target English) but target still defines output language
         final_text_lang = text_translation_target
     else:
         # No translation occurred, use detected language from Stage 1
@@ -470,11 +470,11 @@ def process_audio_chunk(
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
     
-    # Synthesize slate audio (Translated)
-    if stage2_ran and translated_text and slate_tts_segments is not None:
+    # Synthesize slate audio (final output)
+    if final_text and slate_tts_segments is not None:
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
-            translated_text,
+            final_text,
             rate,
             tts_lang,
             reference_audio=audio_segment if voice_match else None,

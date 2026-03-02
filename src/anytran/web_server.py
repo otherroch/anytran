@@ -442,7 +442,9 @@ def run_web_server(
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'translation') {
                             logLine(msg.text);
-                            speak(msg.text, msg.lang || 'en-US');
+                            if (!msg.has_tts) {
+                                speak(msg.text, msg.lang || 'en-US');
+                            }
                         } else if (msg.type === 'tts_audio' && msg.pcm) {
                             playPcm16Audio(msg.pcm, msg.rate || 16000);
                         } else if (msg.type === 'info') {
@@ -662,7 +664,12 @@ def run_web_server(
                             if verbose:
                                 print(f"[web] Sending translation with language: {lang_code} → {web_lang}")
                             
-                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang})
+                            message = json.dumps({
+                                "type": "translation",
+                                "text": output_text,
+                                "lang": web_lang,
+                                "has_tts": bool(tts_payloads),
+                            })
                             await websocket.send_text(message)
                     if tts_payloads:
                         for payload in tts_payloads:

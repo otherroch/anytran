@@ -249,6 +249,42 @@ class TestPipelineStages(unittest.TestCase):
         self.assertEqual(len(segments), 1)
         mock_tts.assert_called_once()
 
+    @patch("anytran.processing.translate_audio")
+    @patch("anytran.processing.translate_text")
+    @patch("anytran.processing.synthesize_tts_pcm_with_cloning")
+    def test_stage3_tts_runs_when_target_is_english(self, mock_tts, mock_translate_text, mock_translate_audio):
+        """TTS should run even when translation target is English."""
+        mock_translate_audio.return_value = (self._audio_chunk(), "hello", "en")
+        mock_translate_text.return_value = None  # Translation skipped for English target
+        mock_tts.return_value = np.zeros(16000, dtype=np.int16)
+
+        segments = []
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            input_lang="en",
+            output_lang="en",
+            magnitude_threshold=0.001,
+            model="tiny",
+            verbose=False,
+            mqtt_broker=None,
+            mqtt_port=None,
+            mqtt_username=None,
+            mqtt_password=None,
+            mqtt_topic=None,
+            scribe_vad=False,
+            timers=False,
+            text_translation_target="en",
+            slate_backend="googletrans",
+            voice_lang=None,
+            lang_prefix=False,
+            slate_tts_segments=segments,
+        )
+
+        self.assertEqual(len(segments), 1)
+        mock_tts.assert_called_once()
+        self.assertEqual(output["final_lang"], "en")
+
 
 class TestProcessAudioChunkOutput(unittest.TestCase):
     """Tests for the dict return value and silence handling of process_audio_chunk."""
