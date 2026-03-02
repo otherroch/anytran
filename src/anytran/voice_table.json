@@ -121,5 +121,181 @@
     "zcr": 0.1396,
     "brightness": 2592.64,
     "gender": "female"
+  },
+  {
+    "onnx_file": "ar_JO-kareem-low.onnx",
+    "pitch": 115.69,
+    "pitch_std": 32.85,
+    "zcr": 0.1077,
+    "brightness": 1415.04,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "ar_JO-kareem-medium.onnx",
+    "pitch": 115.57,
+    "pitch_std": 43.58,
+    "zcr": 0.1002,
+    "brightness": 1822.37,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "el_GR-rapunzelina-low.onnx",
+    "pitch": 180.0,
+    "pitch_std": 45.55,
+    "zcr": 0.1555,
+    "brightness": 2092.41,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "el_GR-rapunzelina-medium.onnx",
+    "pitch": 207.87,
+    "pitch_std": 70.71,
+    "zcr": 0.128,
+    "brightness": 2265.95,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "fa_IR-amir-medium.onnx",
+    "pitch": 155.98,
+    "pitch_std": 57.04,
+    "zcr": 0.0825,
+    "brightness": 1848.54,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fa_IR-ganji-medium.onnx",
+    "pitch": 108.32,
+    "pitch_std": 59.29,
+    "zcr": 0.0868,
+    "brightness": 1753.74,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fa_IR-ganji_adabi-medium.onnx",
+    "pitch": 107.85,
+    "pitch_std": 49.62,
+    "zcr": 0.0904,
+    "brightness": 1905.28,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fa_IR-gyro-medium.onnx",
+    "pitch": 110.41,
+    "pitch_std": 47.9,
+    "zcr": 0.084,
+    "brightness": 1611.8,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "fa_IR-reza_ibrahim-medium.onnx",
+    "pitch": 119.21,
+    "pitch_std": 59.99,
+    "zcr": 0.0412,
+    "brightness": 972.81,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "hi_IN-pratham-medium.onnx",
+    "pitch": 118.43,
+    "pitch_std": 53.6,
+    "zcr": 0.0703,
+    "brightness": 1535.75,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "hi_IN-priyamvada-medium.onnx",
+    "pitch": 213.69,
+    "pitch_std": 66.5,
+    "zcr": 0.0927,
+    "brightness": 1947.15,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "hi_IN-rohan-medium.onnx",
+    "pitch": 162.77,
+    "pitch_std": 71.49,
+    "zcr": 0.0864,
+    "brightness": 1897.55,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "id_ID-news_tts-medium.onnx",
+    "pitch": 248.94,
+    "pitch_std": 34.86,
+    "zcr": 0.0736,
+    "brightness": 1405.85,
+    "gender": "female"
+  },
+  {
+    "onnx_file": "pt_BR-cadu-medium.onnx",
+    "pitch": 139.39,
+    "pitch_std": 57.55,
+    "zcr": 0.1275,
+    "brightness": 2020.27,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "pt_BR-edresson-low.onnx",
+    "pitch": 160.16,
+    "pitch_std": 58.58,
+    "zcr": 0.1999,
+    "brightness": 2271.94,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "pt_BR-faber-medium.onnx",
+    "pitch": 168.85,
+    "pitch_std": 42.57,
+    "zcr": 0.1063,
+    "brightness": 1976.48,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "pt_BR-jeff-medium.onnx",
+    "pitch": 140.25,
+    "pitch_std": 59.82,
+    "zcr": 0.1105,
+    "brightness": 1921.48,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "pt_PT-tugão-medium.onnx",
+    "pitch": 171.08,
+    "pitch_std": 50.12,
+    "zcr": 0.0808,
+    "brightness": 1436.91,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "ru_RU-denis-medium.onnx",
+    "pitch": 145.24,
+    "pitch_std": 45.95,
+    "zcr": 0.0725,
+    "brightness": 1397.13,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "ru_RU-dmitri-medium.onnx",
+    "pitch": 176.61,
+    "pitch_std": 51.68,
+    "zcr": 0.1372,
+    "brightness": 2391.09,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "ru_RU-irina-medium.onnx",
+    "pitch": 164.44,
+    "pitch_std": 57.76,
+    "zcr": 0.12,
+    "brightness": 2206.74,
+    "gender": "male"
+  },
+  {
+    "onnx_file": "ru_RU-ruslan-medium.onnx",
+    "pitch": 161.13,
+    "pitch_std": 105.21,
+    "zcr": 0.1293,
+    "brightness": 1916.89,
+    "gender": "male"
   }
 ]
