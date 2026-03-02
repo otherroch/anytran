@@ -91,7 +91,7 @@ class TestWebServerErrorHandling(unittest.TestCase):
 
     def test_signal_handler_idempotent(self):
         """Signal handler should only request shutdown once."""
-        class DummyServer:
+        class FakeServer:
             def __init__(self):
                 self.should_exit = False
                 self.force_exit = False
@@ -99,7 +99,7 @@ class TestWebServerErrorHandling(unittest.TestCase):
             def handle_exit(self, *args, **kwargs):
                 self.handle_exit_called += 1
 
-        server = DummyServer()
+        server = FakeServer()
         shutdowns = {"count": 0}
         def make_handler():
             shutdown_requested = False

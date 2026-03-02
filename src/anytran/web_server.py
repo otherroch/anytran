@@ -781,6 +781,7 @@ def run_web_server(
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
+                # Wake up the loop so uvicorn can observe should_exit flag
                 loop.call_soon_threadsafe(lambda: None)
         except Exception:
             pass
