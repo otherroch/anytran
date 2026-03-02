@@ -294,7 +294,6 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
 def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, cached_matched_voice=None, verbose=False):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
-    # Extract base language code for per-language cache lookups and language-aware voice selection
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
     
@@ -305,6 +304,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     try:
         if use_piper and not explicit_voice_provided:
             if cached_matched_voice is not None:
+                # Reuse caller-provided matched voice (if available)
                 if verbose:
                     print(f"[TTS] Using previously matched voice: {cached_matched_voice}")
                 piper_voice = cached_matched_voice
@@ -499,11 +499,11 @@ def synthesize_tts_pcm_with_cloning(
                     print(f"Analyzing input voice characteristics...")
                 
                 # Extract voice features once per process
-                features = _cached_voice_features or extract_voice_features(
-                    reference_audio, reference_sample_rate, verbose=verbose
-                )
                 if _cached_voice_features is None:
-                    _cached_voice_features = features
+                    _cached_voice_features = extract_voice_features(
+                        reference_audio, reference_sample_rate, verbose=verbose
+                    )
+                features = _cached_voice_features
                 
                 # Select best matching Piper voice for this target language
                 if verbose:
