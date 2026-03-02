@@ -196,6 +196,9 @@ def get_faster_whisper_model(model_size="medium", device_preference="cuda", comp
         use_cuda = False
 
     device = "cuda" if use_cuda else "cpu"
+    if device == "cpu":
+        compute_type = "float32"
+        
     model_key = (model_size, device, compute_type)
     if _whisper_model is not None and _whisper_device == model_key:
         return _whisper_model
