@@ -538,7 +538,7 @@ def synthesize_tts_pcm_with_cloning(
         # output language, automatically select the best available Piper voice for
         # that language so the synthesized speech sounds natural. This path is
         # skipped when a matched voice already exists for the target language.
-        if use_piper and not explicit_voice_provided:
+        if use_piper and not explicit_voice_provided and not voice_match:
             if lang_base not in _cached_matched_voice:
                 if lang_base != "en":
                     neutral_features = {

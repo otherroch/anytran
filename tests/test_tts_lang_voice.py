@@ -165,6 +165,7 @@ def test_voice_match_runs_per_language(monkeypatch):
 
     # Voice selection should be run for both languages using cached features
     assert ("extract", 16000) in calls
+    assert calls.count(("extract", 16000)) == 1
     assert ("select", "en") in calls
     assert ("select", "fr") in calls
     # Each language should have its own matched voice
