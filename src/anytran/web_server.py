@@ -279,6 +279,7 @@ def run_web_server(
         let source = null;
         let stream = null;
         let audioEnabled = false;
+        let nextAudioTime = 0;
 
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('status');
@@ -364,7 +365,11 @@ def run_web_server(
             const source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContext.destination);
-            source.start();
+            if (nextAudioTime < audioContext.currentTime) {
+                nextAudioTime = audioContext.currentTime;
+            }
+            source.start(nextAudioTime);
+            nextAudioTime += audioBuffer.duration;
         }
 
         function speak(text, lang = 'en-US') {
@@ -493,6 +498,7 @@ def run_web_server(
             if (audioContext) {
                 audioContext.close();
                 audioContext = null;
+                nextAudioTime = 0;
             }
             if (stream) {
                 stream.getTracks().forEach(t => t.stop());
