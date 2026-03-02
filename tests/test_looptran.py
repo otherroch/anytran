@@ -427,16 +427,15 @@ class TestWebPipelineVoiceBackend(unittest.TestCase):
             web_ssl_cert=None,
             web_ssl_key=None,
         )
-        config = _make_config("auto", "fr", slate_text=None)
+        config = _make_config("auto", "test-lang", slate_text=None)
         config["voice_backend"] = "piper"
         config["voice_model"] = "fr_test_voice"
 
-        _web_server.run_web_server.reset_mock()
+        with patch.object(_cli_new, "run_web_server", MagicMock()) as mock_run_web_server:
+            _cli_new._run_web_pipeline(args, config)
 
-        _cli_new._run_web_pipeline(args, config)
-
-        _web_server.run_web_server.assert_called_once()
-        call_kwargs = _web_server.run_web_server.call_args.kwargs
+        mock_run_web_server.assert_called_once()
+        call_kwargs = mock_run_web_server.call_args.kwargs
         self.assertEqual(call_kwargs.get("voice_backend"), "piper")
         self.assertEqual(call_kwargs.get("voice_model"), "fr_test_voice")
 

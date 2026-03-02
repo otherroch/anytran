@@ -11,6 +11,28 @@ from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
 
 
+def _read_piper_env():
+    """Read Piper-related environment flags."""
+    use_piper_env = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
+    env_piper_voice = os.environ.get("PIPER_VOICE", None)
+    return use_piper_env, env_piper_voice
+
+
+def _effective_voice_settings(voice_backend, voice_model):
+    """Resolve the effective voice backend/model using CLI/config first, env as fallback."""
+    use_piper_env, env_piper_voice = _read_piper_env()
+
+    effective_backend = voice_backend
+    if effective_backend is None:
+        effective_backend = "piper" if use_piper_env else "gtts"
+
+    effective_model = voice_model
+    if effective_backend == "piper" and effective_model is None:
+        effective_model = env_piper_voice
+
+    return effective_backend, effective_model
+
+
 def run_web_server(
     input_lang=None,
     output_lang=None,
@@ -80,17 +102,7 @@ def run_web_server(
         name or model file base name). See the Piper documentation for the
         list of supported voices and installation instructions.
     """
-    # Read Piper TTS config from environment variables; see docstring above for details.
-    _use_piper = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
-    env_voice_model = os.environ.get("PIPER_VOICE", None)
-
-    # CLI/config values take precedence; environment variables act as a fallback.
-    if _use_piper and voice_backend != "piper":
-        voice_backend = "piper"
-    if voice_backend is None:
-        voice_backend = "gtts"
-    if voice_model is None:
-        voice_model = env_voice_model
+    voice_backend, voice_model = _effective_voice_settings(voice_backend, voice_model)
     try:
         from fastapi import FastAPI, WebSocket, WebSocketDisconnect
         from fastapi.responses import HTMLResponse

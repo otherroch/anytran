@@ -6,6 +6,37 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
+def _stub_optional_modules():
+    """Stub heavy optional dependencies used during imports."""
+    for _mod in [
+        "numpy",
+        "soundfile",
+        "librosa",
+        "paho",
+        "paho.mqtt",
+        "paho.mqtt.client",
+        "playsound3",
+        "piper",
+        "silero_vad",
+        "moviepy",
+        "moviepy.editor",
+        "torch",
+        "transformers",
+        "faster_whisper",
+        "pydub",
+        "googletrans",
+    ]:
+        if _mod not in sys.modules:
+            sys.modules[_mod] = MagicMock()
+    # text_translator expects googletrans.Translator at import time
+    if not hasattr(sys.modules["googletrans"], "Translator"):
+        sys.modules["googletrans"].Translator = MagicMock()
+
+
+_stub_optional_modules()
+
+from anytran.web_server import _effective_voice_settings
+
 
 class TestWebServerErrorHandling(unittest.TestCase):
     """Test Windows-specific error handling in web server."""
@@ -83,6 +114,19 @@ class TestWebServerErrorHandling(unittest.TestCase):
         
         self.assertTrue(handler_works, "Exception handler should handle ConnectionResetError")
         loop.close()
+
+
+class TestWebServerVoiceSettings(unittest.TestCase):
+    def test_cli_voice_backend_takes_precedence(self):
+        backend, model = _effective_voice_settings("piper", "cli_voice")
+        self.assertEqual(backend, "piper")
+        self.assertEqual(model, "cli_voice")
+
+    def test_env_voice_backend_used_as_fallback(self):
+        with patch.dict(os.environ, {"USE_PIPER": "1", "PIPER_VOICE": "env_voice"}, clear=False):
+            backend, model = _effective_voice_settings(None, None)
+        self.assertEqual(backend, "piper")
+        self.assertEqual(model, "env_voice")
 
 
 if __name__ == "__main__":
