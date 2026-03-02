@@ -121,6 +121,8 @@ def _run_web_pipeline(args, config):
         lang_prefix=config["lang_prefix"],
         voice_backend=config["voice_backend"],
         voice_model=config["voice_model"],
+        voice_match=config["voice_match"],
+        voice_lang=config["voice_lang"],
     )
     return 0
 

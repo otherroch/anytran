@@ -11,6 +11,32 @@ from .processing import process_audio_chunk
 from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
 
+_WINDOWS_CTRL_HANDLER = None
+
+
+def _install_windows_ctrl_handler(signal_handler):
+    """
+    Install a Windows console control handler and keep a reference to the
+    ctypes callback so it is not garbage-collected.
+    """
+    global _WINDOWS_CTRL_HANDLER
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        def _handler(ctrl_type):
+            if ctrl_type in (0, 1):
+                signal_handler(signal.SIGINT, None)
+                return True
+            return False
+
+        handler_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+        _WINDOWS_CTRL_HANDLER = handler_type(_handler)
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_WINDOWS_CTRL_HANDLER, True)
+    except Exception:
+        _WINDOWS_CTRL_HANDLER = None
+
 
 def _read_piper_env():
     """Read Piper-related environment flags."""
@@ -73,6 +99,8 @@ def _process_web_audio_chunk(
     langswap_enabled,
     langswap_input_lang,
     langswap_output_lang,
+    voice_match=False,
+    voice_lang=None,
 ):
     """Process a web audio chunk and collect any TTS audio payloads."""
     slate_tts_segments = []
@@ -101,6 +129,8 @@ def _process_web_audio_chunk(
         langswap_input_lang=langswap_input_lang,
         langswap_output_lang=langswap_output_lang,
         slate_tts_segments=slate_tts_segments,
+        voice_match=voice_match,
+        voice_lang=voice_lang,
     )
     return translated_text, _serialize_tts_segments(slate_tts_segments, rate)
 
@@ -132,6 +162,8 @@ def run_web_server(
     lang_prefix=False,
     voice_backend=None,
     voice_model=None,
+    voice_match=False,
+    voice_lang=None,
 ):
     """
     Start the real-time translation web server.
@@ -613,6 +645,8 @@ def run_web_server(
                         langswap_enabled=langswap_enabled,
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
+                        voice_match=voice_match,
+                        voice_lang=voice_lang,
                     )
                     if translated_text:
                         # process_audio_chunk returns a dict with 'output', 'scribe', 'slate', and 'final_lang' keys
@@ -733,29 +767,11 @@ def run_web_server(
         server.should_exit = True
         server.force_exit = True
 
-    def install_windows_ctrl_handler():
-        if os.name != "nt":
-            return
-        try:
-            import ctypes
-
-            def _handler(ctrl_type):
-                if ctrl_type in (0, 1):
-                    signal_handler(signal.SIGINT, None)
-                    return True
-                return False
-
-            kernel32 = ctypes.windll.kernel32
-            handler_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
-            kernel32.SetConsoleCtrlHandler(handler_type(_handler), True)
-        except Exception:
-            pass
-
     signal.signal(signal.SIGINT, signal_handler)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, signal_handler)
 
-    install_windows_ctrl_handler()
+    _install_windows_ctrl_handler(signal_handler)
 
     import asyncio
 

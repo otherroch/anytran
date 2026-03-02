@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 import base64
@@ -61,6 +62,32 @@ from anytran import web_server
 
 class TestWebServerErrorHandling(unittest.TestCase):
     """Test Windows-specific error handling in web server."""
+
+    def test_windows_ctrl_handler_keeps_callback_reference(self):
+        """Ensure Windows handler isn't garbage collected."""
+        kernel32 = MagicMock()
+        callbacks = {}
+
+        def fake_handler_wrapper(func):
+            callbacks["cb"] = func
+            return "wrapped"
+
+        fake_ctypes = types.SimpleNamespace(
+            WINFUNCTYPE=lambda *args, **kwargs: fake_handler_wrapper,
+            c_bool=MagicMock(),
+            c_uint=MagicMock(),
+            windll=types.SimpleNamespace(kernel32=kernel32),
+        )
+
+        web_server._WINDOWS_CTRL_HANDLER = None
+        with patch("anytran.web_server.os.name", "nt"), \
+             patch.dict(sys.modules, {"ctypes": fake_ctypes}, clear=False):
+            web_server._install_windows_ctrl_handler(MagicMock())
+
+        self.assertIsNotNone(web_server._WINDOWS_CTRL_HANDLER)
+        self.assertIsNotNone(callbacks.get("cb"))
+        self.assertEqual("wrapped", web_server._WINDOWS_CTRL_HANDLER)
+        kernel32.SetConsoleCtrlHandler.assert_called_once_with("wrapped", True)
 
     def test_windows_socket_error_suppression(self):
         """Test that ConnectionResetError is properly suppressed on Windows."""
@@ -188,6 +215,8 @@ class TestWebServerTTSStreaming(unittest.TestCase):
                 langswap_enabled=False,
                 langswap_input_lang="en",
                 langswap_output_lang="en",
+                voice_match=False,
+                voice_lang=None,
             )
 
         self.assertIsNotNone(recorded.get("slate_arg"))
@@ -199,6 +228,47 @@ class TestWebServerTTSStreaming(unittest.TestCase):
         self.assertEqual(16000, payload["rate"])
         decoded = np.frombuffer(base64.b64decode(payload["pcm"]), dtype=np.int16)
         np.testing.assert_array_equal(sample_audio, decoded)
+
+    def test_process_web_audio_chunk_passes_voice_match(self):
+        """Voice match flag should be forwarded to processing."""
+        sample_audio = np.array([1, -1], dtype=np.int16)
+        call_args = {}
+
+        def fake_process_audio_chunk(*args, **kwargs):
+            call_args.update(kwargs)
+            return {"output": "x", "final_lang": "en"}
+
+        with patch.object(web_server, "process_audio_chunk", side_effect=fake_process_audio_chunk):
+            web_server._process_web_audio_chunk(
+                audio_segment=sample_audio,
+                rate=16000,
+                current_input_lang="en",
+                current_output_lang="en",
+                magnitude_threshold=0.02,
+                model=None,
+                verbose=False,
+                mqtt_broker=None,
+                mqtt_port=1883,
+                mqtt_username=None,
+                mqtt_password=None,
+                mqtt_topic="translation",
+                stream_id="web",
+                scribe_vad=False,
+                voice_backend="piper",
+                voice_model="voice",
+                timers=False,
+                timing_stats=None,
+                scribe_backend="auto",
+                text_translation_target="en",
+                langswap_enabled=False,
+                langswap_input_lang="en",
+                langswap_output_lang="en",
+                voice_match=True,
+                voice_lang="fr",
+            )
+
+        self.assertTrue(call_args.get("voice_match"))
+        self.assertEqual("fr", call_args.get("voice_lang"))
 
 
 if __name__ == "__main__":
