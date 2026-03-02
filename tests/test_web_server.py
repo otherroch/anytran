@@ -35,6 +35,24 @@ def _stub_optional_modules():
 
 _stub_optional_modules()
 
+# Remove any prior stubs of anytran.web_server that other tests might have installed
+if sys.modules.get("anytran.web_server", None) is not None and not hasattr(sys.modules["anytran.web_server"], "_effective_voice_settings"):
+    del sys.modules["anytran.web_server"]
+if sys.modules.get("anytran.config", None) is not None and not hasattr(sys.modules["anytran.config"], "get_whisper_backend"):
+    del sys.modules["anytran.config"]
+if sys.modules.get("anytran.processing", None) is not None and not hasattr(sys.modules["anytran.processing"], "process_audio_chunk"):
+    del sys.modules["anytran.processing"]
+if sys.modules.get("anytran.tts", None) is not None and not hasattr(sys.modules["anytran.tts"], "play_output"):
+    del sys.modules["anytran.tts"]
+if sys.modules.get("anytran.voice_matcher", None) is not None and not hasattr(sys.modules["anytran.voice_matcher"], "extract_voice_features"):
+    del sys.modules["anytran.voice_matcher"]
+if sys.modules.get("anytran.utils", None) is not None and not hasattr(sys.modules["anytran.utils"], "normalize_lang_code"):
+    del sys.modules["anytran.utils"]
+if sys.modules.get("anytran.vad", None) is not None and not hasattr(sys.modules["anytran.vad"], "has_speech_silero"):
+    del sys.modules["anytran.vad"]
+if sys.modules.get("anytran.whisper_backend", None) is not None and not hasattr(sys.modules["anytran.whisper_backend"], "translate_audio"):
+    del sys.modules["anytran.whisper_backend"]
+
 from anytran.web_server import _effective_voice_settings
 
 
