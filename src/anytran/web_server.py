@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import signal
@@ -31,6 +32,77 @@ def _effective_voice_settings(voice_backend, voice_model):
         effective_model = env_piper_voice
 
     return effective_backend, effective_model
+
+
+def _serialize_tts_segments(segments, rate):
+    """Serialize PCM segments for websocket delivery."""
+    payloads = []
+    if not segments:
+        return payloads
+
+    for seg in segments:
+        if seg is None:
+            continue
+        pcm = np.asarray(seg).astype(np.int16)
+        encoded = base64.b64encode(pcm.tobytes()).decode("ascii")
+        payloads.append({"type": "tts_audio", "pcm": encoded, "rate": rate})
+    return payloads
+
+
+def _process_web_audio_chunk(
+    audio_segment,
+    rate,
+    current_input_lang,
+    current_output_lang,
+    magnitude_threshold,
+    model,
+    verbose,
+    mqtt_broker,
+    mqtt_port,
+    mqtt_username,
+    mqtt_password,
+    mqtt_topic,
+    stream_id,
+    scribe_vad,
+    voice_backend,
+    voice_model,
+    timers,
+    timing_stats,
+    scribe_backend,
+    text_translation_target,
+    langswap_enabled,
+    langswap_input_lang,
+    langswap_output_lang,
+):
+    """Process a web audio chunk and collect any TTS audio payloads."""
+    slate_tts_segments = []
+    translated_text = process_audio_chunk(
+        audio_segment,
+        rate,
+        current_input_lang,
+        current_output_lang,
+        magnitude_threshold,
+        model,
+        verbose,
+        mqtt_broker,
+        mqtt_port,
+        mqtt_username,
+        mqtt_password,
+        mqtt_topic,
+        stream_id=stream_id,
+        scribe_vad=scribe_vad,
+        voice_backend=voice_backend,
+        voice_model=voice_model,
+        timers=timers,
+        timing_stats=timing_stats,
+        scribe_backend=scribe_backend,
+        text_translation_target=text_translation_target,
+        langswap_enabled=langswap_enabled,
+        langswap_input_lang=langswap_input_lang,
+        langswap_output_lang=langswap_output_lang,
+        slate_tts_segments=slate_tts_segments,
+    )
+    return translated_text, _serialize_tts_segments(slate_tts_segments, rate)
 
 
 def run_web_server(
@@ -271,6 +343,30 @@ def run_web_server(
             return output;
         }
 
+        function playPcm16Audio(base64Data, sampleRate = 16000) {
+            if (!audioEnabled) return;
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const binary = atob(base64Data);
+            const len = binary.length;
+            const buffer = new ArrayBuffer(len);
+            const view = new Uint8Array(buffer);
+            for (let i = 0; i < len; i++) {
+                view[i] = binary.charCodeAt(i);
+            }
+            const pcm16 = new Int16Array(buffer);
+            const audioBuffer = audioContext.createBuffer(1, pcm16.length, sampleRate);
+            const channelData = audioBuffer.getChannelData(0);
+            for (let i = 0; i < pcm16.length; i++) {
+                channelData[i] = pcm16[i] / 32768;
+            }
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start();
+        }
+
         function speak(text, lang = 'en-US') {
             if (!audioEnabled || !('speechSynthesis' in window)) return;
             const utterance = new SpeechSynthesisUtterance(text);
@@ -342,6 +438,8 @@ def run_web_server(
                         if (msg.type === 'translation') {
                             logLine(msg.text);
                             speak(msg.text, msg.lang || 'en-US');
+                        } else if (msg.type === 'tts_audio' && msg.pcm) {
+                            playPcm16Audio(msg.pcm, msg.rate || 16000);
                         } else if (msg.type === 'info') {
                             logLine('[info] ' + msg.text);
                         }
@@ -483,19 +581,19 @@ def run_web_server(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    translated_text = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        current_input_lang,
-                        current_output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
+                    translated_text, tts_payloads = _process_web_audio_chunk(
+                        audio_segment=audio_segment,
+                        rate=rate,
+                        current_input_lang=current_input_lang,
+                        current_output_lang=current_output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
+                        mqtt_broker=mqtt_broker,
+                        mqtt_port=mqtt_port,
+                        mqtt_username=mqtt_username,
+                        mqtt_password=mqtt_password,
+                        mqtt_topic=mqtt_topic,
                         stream_id="web",
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
@@ -560,6 +658,9 @@ def run_web_server(
                             
                             message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang})
                             await websocket.send_text(message)
+                    if tts_payloads:
+                        for payload in tts_payloads:
+                            await websocket.send_text(json.dumps(payload))
         except WebSocketDisconnect:
             pass
         except Exception as exc:

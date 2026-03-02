@@ -3,6 +3,8 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+import base64
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
@@ -54,6 +56,7 @@ if sys.modules.get("anytran.whisper_backend", None) is not None and not hasattr(
     del sys.modules["anytran.whisper_backend"]
 
 from anytran.web_server import _effective_voice_settings
+from anytran import web_server
 
 
 class TestWebServerErrorHandling(unittest.TestCase):
@@ -145,6 +148,57 @@ class TestWebServerVoiceSettings(unittest.TestCase):
             backend, model = _effective_voice_settings(None, None)
         self.assertEqual(backend, "piper")
         self.assertEqual(model, "env_voice")
+
+
+class TestWebServerTTSStreaming(unittest.TestCase):
+    """Ensure web server audio chunks request TTS output."""
+
+    def test_process_web_audio_chunk_serializes_tts_payloads(self):
+        sample_audio = np.array([0, 1000, -1000, 0], dtype=np.int16)
+        recorded = {}
+
+        def fake_process_audio_chunk(*args, **kwargs):
+            recorded["slate_arg"] = kwargs.get("slate_tts_segments")
+            if recorded["slate_arg"] is not None:
+                recorded["slate_arg"].append(sample_audio)
+            return {"output": "hello", "final_lang": "en"}
+
+        with patch.object(web_server, "process_audio_chunk", side_effect=fake_process_audio_chunk):
+            result, payloads = web_server._process_web_audio_chunk(
+                audio_segment=sample_audio,
+                rate=16000,
+                current_input_lang="en",
+                current_output_lang="en",
+                magnitude_threshold=0.02,
+                model=None,
+                verbose=False,
+                mqtt_broker=None,
+                mqtt_port=1883,
+                mqtt_username=None,
+                mqtt_password=None,
+                mqtt_topic="translation",
+                stream_id="web",
+                scribe_vad=False,
+                voice_backend="piper",
+                voice_model="voice",
+                timers=False,
+                timing_stats=None,
+                scribe_backend="auto",
+                text_translation_target="en",
+                langswap_enabled=False,
+                langswap_input_lang="en",
+                langswap_output_lang="en",
+            )
+
+        self.assertIsNotNone(recorded.get("slate_arg"))
+        self.assertIsInstance(recorded["slate_arg"], list)
+        self.assertEqual({"output": "hello", "final_lang": "en"}, result)
+        self.assertEqual(1, len(payloads))
+        payload = payloads[0]
+        self.assertEqual("tts_audio", payload["type"])
+        self.assertEqual(16000, payload["rate"])
+        decoded = np.frombuffer(base64.b64decode(payload["pcm"]), dtype=np.int16)
+        np.testing.assert_array_equal(sample_audio, decoded)
 
 
 if __name__ == "__main__":
