@@ -64,7 +64,7 @@ def test_synthesize_tts_pcm_with_cloning_auto_selects_language_voice(tmp_path, m
     English voice.
     """
     # Reset module-level state
-    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", {})
 
     # Build a minimal voice table with both English and French voices
     table = [
@@ -177,7 +177,7 @@ def test_synthesize_tts_pcm_with_cloning_explicit_voice_not_overridden(tmp_path,
     When the user explicitly provides a --voice-model that is not the default,
     it should not be overridden by the language-aware auto-selection.
     """
-    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", {})
 
     used_voice = {}
 
@@ -207,7 +207,7 @@ def test_synthesize_tts_pcm_with_cloning_english_output_keeps_default_voice(tmp_
     """
     When output_lang is English, the default voice should not be auto-replaced.
     """
-    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", {})
 
     used_voice = {}
 
@@ -233,7 +233,7 @@ def test_synthesize_tts_pcm_with_cloning_english_output_keeps_default_voice(tmp_
 
 
 def test_synthesize_tts_pcm_auto_selects_language_voice(tmp_path, monkeypatch):
-    monkeypatch.setattr(_tts_module, "_cached_matched_voice", None)
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", {})
 
     table = [
         {"onnx_file": "en_US-lessac-medium.onnx", "pitch": 120, "gender": "male"},
