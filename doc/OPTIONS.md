@@ -778,6 +778,67 @@ These options allow you to load settings from a config file or generate a templa
 
 ---
 
+## Voice Table Generation
+
+These options generate or update the voice table JSON file used by the voice matching feature. They are processed early and cause the program to exit after generation without requiring an input source.
+
+### `--voice-table-gen`
+- **Type**: Boolean flag
+- **Default**: Disabled
+- **Purpose**: Generate or update the voice table JSON file with voice features and exit
+- **Behavior**:
+  - Scans available Piper TTS voices for the specified languages
+  - Extracts voice features (pitch, gender, spectral characteristics) for each voice
+  - Writes results to the output JSON file
+  - Exits immediately after generation — no pipeline is run
+- **Requirements**: `pip install -e .[piper]`; Piper TTS and librosa must be installed
+- **Examples**:
+  ```bash
+  # Generate voice table for French (default)
+  anytran --voice-table-gen
+
+  # Generate for French and English
+  anytran --voice-table-gen --voice-table-lang fr,en
+
+  # Generate for all supported languages
+  anytran --voice-table-gen --voice-table-lang all
+
+  # Generate to a custom output path
+  anytran --voice-table-gen --voice-table-lang fr,en --voice-table-output ./my_voice_table.json
+  ```
+- **Interactions**:
+  - Does not require an input source (exits before pipeline validation)
+  - Use `--voice-table-lang` to select languages
+  - Use `--voice-table-output` to set the output file path
+
+### `--voice-table-lang <languages>`
+- **Type**: Comma-separated string of language codes
+- **Default**: `fr`
+- **Special value**: `all` — process all supported languages
+- **Purpose**: Specify which languages to include when generating the voice table
+- **Examples**:
+  - `fr` — French only
+  - `fr,en` — French and English
+  - `fr,en,de,es` — French, English, German, Spanish
+  - `all` — all supported languages
+- **Interactions**:
+  - Only used when `--voice-table-gen` is specified
+
+### `--voice-table-output <path>`
+- **Type**: File path
+- **Default**: `src/anytran/voice_table.json`
+- **Purpose**: Set the output path for the generated voice table JSON file
+- **Behavior**:
+  - Creates or overwrites the file at the specified path
+  - The generated file is used by `--voice-match` at runtime to select voices
+- **Examples**:
+  - `--voice-table-output ./my_voice_table.json`
+  - `--voice-table-output /custom/path/voice_table.json`
+- **Interactions**:
+  - Only used when `--voice-table-gen` is specified
+
+---
+
 ## Inverted Boolean Options
 
 Many boolean flags have a paired `--no-*` (or `--*`) counterpart that explicitly disables the feature. These are useful when a config file sets a flag to `true` and you need to override it from the CLI, or when scripts need to be explicit about the state of a flag.

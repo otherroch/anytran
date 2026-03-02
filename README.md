@@ -54,6 +54,8 @@ Examples:
   - `anytran --input notes.txt --input-lang en --output-lang es --slate-text spanish.txt`
 - File input (text -> translate, local AI backend):
   - `anytran --input notes.txt --input-lang en --output-lang fr --slate-text french.txt --slate-backend marianmt`
+- Generate voice table (for voice matching):
+  - `anytran --voice-table-gen --voice-table-lang fr,en`
 
 ## Timing summaries
 - `anytran --input sample.wav --timers`  # Print timing summary by stage
