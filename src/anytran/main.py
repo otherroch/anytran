@@ -78,6 +78,7 @@ def main():
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None)
     pre_parser.add_argument("--genconfig", nargs="?", const="anytran.json", default=None)
+    pre_parser.add_argument("--voice-table-gen", action="store_true", default=False)
     pre_args, _ = pre_parser.parse_known_args()
 
     parser = argparse.ArgumentParser(
@@ -330,6 +331,29 @@ Examples:
         help="Enable normalization of the input text file before processing (default)",
     )
 
+    # Voice table generation options
+    voice_table_group = parser.add_argument_group("voice table generation options")
+    voice_table_group.add_argument(
+        "--voice-table-gen",
+        action="store_true",
+        default=False,
+        help="Generate or update the voice table JSON file with voice features and exit.",
+    )
+    voice_table_group.add_argument(
+        "--voice-table-lang",
+        type=str,
+        default="fr",
+        metavar="LANGUAGES",
+        help="Comma-separated language codes for voice table generation (default: fr). Use 'all' for all languages.",
+    )
+    voice_table_group.add_argument(
+        "--voice-table-output",
+        type=str,
+        default="src/anytran/voice_table.json",
+        metavar="PATH",
+        help="Output JSON file path for voice table generation (default: src/anytran/voice_table.json).",
+    )
+
     # Config file options
     parser.add_argument(
         "--config",
@@ -361,6 +385,13 @@ Examples:
         parser.set_defaults(**file_defaults)
 
     args = parser.parse_args()
+
+    # --voice-table-gen: generate/update the voice table and exit.
+    # Must happen before the input-source enforcement check.
+    if args.voice_table_gen:
+        from .voice_table import get_selected_languages, run as run_voice_table
+        run_voice_table(get_selected_languages(args.voice_table_lang), args.voice_table_output)
+        return 0
 
     # --genconfig: write the actual parsed values (not static defaults) and exit.
     # Must happen before the input-source enforcement check so that --genconfig

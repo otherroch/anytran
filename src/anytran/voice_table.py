@@ -132,7 +132,7 @@ def get_selected_languages(raw_languages):
 
 def run(selected_languages, output_file):
     import librosa
-    from anytran.voice_matcher import extract_voice_features
+    from .voice_matcher import extract_voice_features
 
     if not selected_languages:
         selected_languages = ["fr"]
