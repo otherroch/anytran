@@ -255,7 +255,7 @@ class TestPipelineStages(unittest.TestCase):
     def test_stage3_tts_runs_when_target_is_english(self, mock_tts, mock_translate_text, mock_translate_audio):
         """TTS should run even when translation target is English."""
         mock_translate_audio.return_value = (self._audio_chunk(), "hello", "en")
-        mock_translate_text.return_value = None  # Translation returns None when Stage 2 is skipped (target equals input or is English)
+        mock_translate_text.return_value = None  # Stage 2 skipped
         mock_tts.return_value = np.zeros(16000, dtype=np.int16)
 
         segments = []
