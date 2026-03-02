@@ -32,7 +32,8 @@ from .voice_matcher import (
 )
 
 
-_cached_matched_voice = None
+_cached_matched_voice = {}
+_cached_voice_features = None
 _piper_voice_cache = {}
 
 
@@ -480,38 +481,51 @@ def synthesize_tts_pcm_with_cloning(
         return None
     
     try:
-        # Auto voice matching with Piper
+        # Auto voice matching with Piper (per-language cache)
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
         explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
+        lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
+        cache = _cached_matched_voice or {}
   
         cached_auto_match_applicable = voice_match and reference_audio is not None and not explicit_voice_provided
-        if cached_auto_match_applicable and _cached_matched_voice is None:
-            if verbose:
-                print("==========================================")
-                print("AUTO-VOICE MATCHING (--voice-match)")
-                print("==========================================")
-                print(f"Analyzing input voice characteristics...")
-            
-            # Extract voice features
-            features = extract_voice_features(reference_audio, reference_sample_rate, verbose=True if verbose else False)
-            
-            # Select best matching Piper voice
-            if verbose:
-                print(f"Selecting best {output_lang} voice for detected characteristics...")
-            matched_voice = select_best_piper_voice(features, output_lang, verbose=True if verbose else False)
-            
-            if matched_voice:
+        if cached_auto_match_applicable:
+            matched_cached_voice = cache.get(lang_base)
+            if matched_cached_voice is None:
                 if verbose:
-                    print(f"✓ Voice matching successful: {matched_voice}")
                     print("==========================================")
-                piper_voice = matched_voice
-                _cached_matched_voice = matched_voice
-                use_piper = True
+                    print("AUTO-VOICE MATCHING (--voice-match)")
+                    print("==========================================")
+                    print(f"Analyzing input voice characteristics...")
+                
+                # Extract voice features once per process
+                global _cached_voice_features
+                if _cached_voice_features is None:
+                    _cached_voice_features = extract_voice_features(reference_audio, reference_sample_rate, verbose=True if verbose else False)
+                features = _cached_voice_features
+                
+                # Select best matching Piper voice for this target language
+                if verbose:
+                    print(f"Selecting best {output_lang} voice for detected characteristics...")
+                matched_voice = select_best_piper_voice(features, output_lang, verbose=True if verbose else False)
+                
+                if matched_voice:
+                    if verbose:
+                        print(f"✓ Voice matching successful: {matched_voice}")
+                        print("==========================================")
+                    piper_voice = matched_voice
+                    cache[lang_base] = matched_voice
+                    _cached_matched_voice = cache
+                    use_piper = True
+                else:
+                    if verbose:
+                        print("✗ No suitable voice found, using default")
+                        print("==========================================")
             else:
                 if verbose:
-                    print("✗ No suitable voice found, using default")
-                    print("==========================================")
+                    print(f"Using cached matched voice for {lang_base}: {matched_cached_voice}")
+                piper_voice = matched_cached_voice
+                use_piper = True
         elif voice_match and reference_audio is not None and explicit_voice_provided:
             if verbose:
                 print("Explicit voice provided (--voice-model), skipping --voice-match")
@@ -519,31 +533,27 @@ def synthesize_tts_pcm_with_cloning(
             if verbose:
                 print("⚠ Auto-match-voice requested but no reference audio available")
         
-        if _cached_matched_voice is not None:
-            if verbose:
-                print(f"Using previously matched voice: {_cached_matched_voice}")
-            piper_voice = _cached_matched_voice
-            use_piper = True
 
         # Language-aware automatic voice selection:
         # When Piper is requested with the default English voice but a non-English
         # output language, automatically select the best available Piper voice for
         # that language so the synthesized speech sounds natural.
-        if use_piper and not explicit_voice_provided and _cached_matched_voice is None:
+        if use_piper and not explicit_voice_provided:
             lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
-            if lang_base != "en":
-                neutral_features = {
-                    "mean_pitch": 150.0,
-                    "gender": "male",
-                    "pitch_std": 0.0,
-                    "zcr": 0.1,
-                    "brightness": 2000.0,
-                }
-                lang_voice = select_best_piper_voice(neutral_features, output_lang, verbose=verbose)
-                if lang_voice:
-                    if verbose:
-                        print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
-                    piper_voice = lang_voice
+            if not _cached_matched_voice or lang_base not in _cached_matched_voice:
+                if lang_base != "en":
+                    neutral_features = {
+                        "mean_pitch": 150.0,
+                        "gender": "male",
+                        "pitch_std": 0.0,
+                        "zcr": 0.1,
+                        "brightness": 2000.0,
+                    }
+                    lang_voice = select_best_piper_voice(neutral_features, output_lang, verbose=verbose)
+                    if lang_voice:
+                        if verbose:
+                            print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
+                        piper_voice = lang_voice
 
         # Standard Piper TTS or gTTS
         tts_pcm = synthesize_tts_pcm(

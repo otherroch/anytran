@@ -110,6 +110,68 @@ def test_synthesize_tts_pcm_with_cloning_auto_selects_language_voice(tmp_path, m
     )
 
 
+def test_voice_match_runs_per_language(monkeypatch):
+    """When --voice-match is enabled, matching should occur for each target language."""
+    monkeypatch.setattr(_tts_module, "_cached_matched_voice", {})
+    monkeypatch.setattr(_tts_module, "_cached_voice_features", None)
+
+    calls = []
+
+    def fake_extract(audio, sr=16000, verbose=False):
+        calls.append(("extract", sr))
+        return {"mean_pitch": 120.0, "gender": "male", "pitch_std": 0.0, "zcr": 0.1, "brightness": 2000.0}
+
+    def fake_select(features, language, verbose=False):
+        calls.append(("select", language))
+        return f"{language}_voice"
+
+    used_voice = []
+
+    def fake_synthesize_tts_pcm(text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False):
+        used_voice.append((output_lang, voice_model))
+        return None
+
+    monkeypatch.setattr(_tts_module, "extract_voice_features", fake_extract)
+    monkeypatch.setattr(_tts_module, "select_best_piper_voice", fake_select)
+    monkeypatch.setattr(_tts_module, "synthesize_tts_pcm", fake_synthesize_tts_pcm)
+
+    dummy_audio = np.zeros(16000, dtype=np.float32)
+
+    # First: English output
+    _tts_module.synthesize_tts_pcm_with_cloning(
+        translated_text="hello",
+        rate=16000,
+        output_lang="en",
+        reference_audio=dummy_audio,
+        reference_sample_rate=16000,
+        voice_backend="piper",
+        voice_model="en_US-lessac-medium",
+        voice_match=True,
+        verbose=False,
+    )
+
+    # Second: French output in same process; should match separately
+    _tts_module.synthesize_tts_pcm_with_cloning(
+        translated_text="bonjour",
+        rate=16000,
+        output_lang="fr",
+        reference_audio=dummy_audio,
+        reference_sample_rate=16000,
+        voice_backend="piper",
+        voice_model="en_US-lessac-medium",
+        voice_match=True,
+        verbose=False,
+    )
+
+    # Voice selection should be run for both languages using cached features
+    assert ("extract", 16000) in calls
+    assert ("select", "en") in calls
+    assert ("select", "fr") in calls
+    # Each language should have its own matched voice
+    assert ("en", "en_voice") in used_voice
+    assert ("fr", "fr_voice") in used_voice
+
+
 def test_synthesize_tts_pcm_with_cloning_explicit_voice_not_overridden(tmp_path, monkeypatch):
     """
     When the user explicitly provides a --voice-model that is not the default,
