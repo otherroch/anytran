@@ -484,9 +484,11 @@ def synthesize_tts_pcm_with_cloning(
         # Auto voice matching with Piper (per-language cache)
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
+        if _cached_matched_voice is None:
+            _cached_matched_voice = {}
         explicit_voice_provided = piper_voice and piper_voice != "en_US-lessac-medium"
         lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
-        cache = _cached_matched_voice or {}
+        cache = _cached_matched_voice
   
         cached_auto_match_applicable = voice_match and reference_audio is not None and not explicit_voice_provided
         if cached_auto_match_applicable:
@@ -514,8 +516,7 @@ def synthesize_tts_pcm_with_cloning(
                         print(f"✓ Voice matching successful: {matched_voice}")
                         print("==========================================")
                     piper_voice = matched_voice
-                    cache[lang_base] = matched_voice
-                    _cached_matched_voice = cache
+                    _cached_matched_voice[lang_base] = matched_voice
                     use_piper = True
                 else:
                     if verbose:
@@ -539,7 +540,6 @@ def synthesize_tts_pcm_with_cloning(
         # output language, automatically select the best available Piper voice for
         # that language so the synthesized speech sounds natural.
         if use_piper and not explicit_voice_provided:
-            lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
             if not _cached_matched_voice or lang_base not in _cached_matched_voice:
                 if lang_base != "en":
                     neutral_features = {
