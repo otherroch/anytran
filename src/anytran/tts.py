@@ -225,9 +225,6 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
 
 
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
-    # lang_base is used for both voice-matching and language-aware fallback paths; compute once
-    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
-    lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
 
