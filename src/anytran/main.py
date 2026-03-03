@@ -162,7 +162,7 @@ Examples:
     
     # Voice (TTS) options
     voice_group = parser.add_argument_group("voice options (text-to-speech / Stage 3)")
-    voice_group.add_argument("--voice-backend", type=str, default="gtts", choices=["piper", "gtts"], help="TTS backend (default: gtts). Use 'piper' for Piper TTS.")
+    voice_group.add_argument("--voice-backend", type=str, default="auto", choices=["piper", "gtts", "auto"], help="TTS backend (default: auto). Use 'piper' for Piper TTS or 'gtts' for Google TTS.")
     voice_group.add_argument("--voice-model", type=str, default="en_US-lessac-medium", help="Voice model name for TTS (default: en_US-lessac-medium). Used as the Piper voice model when --voice-backend piper is selected.")
     voice_group.add_argument("--voice-lang", type=str, help="Override TTS language")
     voice_group.add_argument("--voice-match", action="store_true", help="Auto-select Piper voice based on input voice characteristics")

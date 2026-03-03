@@ -1,6 +1,8 @@
 import json
 import os
 import signal
+import base64
+
 
 import numpy as np
 
@@ -10,6 +12,19 @@ from .processing import process_audio_chunk
 from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
 
+def _serialize_tts_segments(segments, rate):
+    """Serialize PCM segments for websocket delivery."""
+    payloads = []
+    if not segments:
+        return payloads
+
+    for seg in segments:
+        if seg is None:
+            continue
+        pcm = np.asarray(seg).astype(np.int16)
+        encoded = base64.b64encode(pcm.tobytes()).decode("ascii")
+        payloads.append({"type": "tts_audio", "pcm": encoded, "rate": rate})
+    return payloads
 
 def run_web_server(
     input_lang=None,
@@ -33,9 +48,13 @@ def run_web_server(
     timers=False,
     timers_all=False,
     scribe_backend="auto",
+    slate_backend="googletrans",
     dedup=False,
     keep_temp=False,
     lang_prefix=False,
+    voice_backend=None,
+    voice_model=None,
+    voice_match=False,
 ):
     """
     Start the real-time translation web server.
@@ -80,8 +99,10 @@ def run_web_server(
     """
     # Read Piper TTS config from environment variables; see docstring above for details.
     _use_piper = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
-    voice_backend = "piper" if _use_piper else "gtts"
-    voice_model = os.environ.get("PIPER_VOICE", None)
+    if voice_backend is None:
+        voice_backend = "piper" if _use_piper else "gtts"
+    if voice_model is None and _use_piper:
+        voice_model = os.environ.get("PIPER_VOICE", None)
     try:
         from fastapi import FastAPI, WebSocket, WebSocketDisconnect
         from fastapi.responses import HTMLResponse
@@ -186,6 +207,7 @@ def run_web_server(
         let source = null;
         let stream = null;
         let audioEnabled = false;
+        let nextAudioTime = 0;
 
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('status');
@@ -248,6 +270,34 @@ def run_web_server(
                 output[i] = s < 0 ? s * 32768 : s * 32767;
             }
             return output;
+        }
+
+        function playPcm16Audio(base64Data, sampleRate = 16000) {
+            if (!audioEnabled) return;
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const binary = atob(base64Data);
+            const len = binary.length;
+            const buffer = new ArrayBuffer(len);
+            const view = new Uint8Array(buffer);
+            for (let i = 0; i < len; i++) {
+                view[i] = binary.charCodeAt(i);
+            }
+            const pcm16 = new Int16Array(buffer);
+            const audioBuffer = audioContext.createBuffer(1, pcm16.length, sampleRate);
+            const channelData = audioBuffer.getChannelData(0);
+            for (let i = 0; i < pcm16.length; i++) {
+                channelData[i] = pcm16[i] / 32768;
+            }
+            const bufferSource = audioContext.createBufferSource();
+            bufferSource.buffer = audioBuffer;
+            bufferSource.connect(audioContext.destination);
+            if (nextAudioTime < audioContext.currentTime) {
+                nextAudioTime = audioContext.currentTime;
+            }
+            bufferSource.start(nextAudioTime);
+            nextAudioTime += audioBuffer.duration;
         }
 
         function speak(text, lang = 'en-US') {
@@ -320,12 +370,16 @@ def run_web_server(
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'translation') {
                             logLine(msg.text);
-                            speak(msg.text, msg.lang || 'en-US');
+                            if (!msg.has_slate_tts) {
+                                speak(msg.text, msg.lang || 'en-US');
+                            }
+                        } else if (msg.type === 'tts_audio' && msg.pcm) {
+                            playPcm16Audio(msg.pcm, msg.rate || 16000);
                         } else if (msg.type === 'info') {
                             logLine('[info] ' + msg.text);
-                        }
-                    } catch {
-                        logLine(event.data);
+                        } 
+                    } catch (err) {
+                        logLine('[error] Failed to parse message: ' + (err && err.message ? err.message : err));
                     }
                 };
 
@@ -462,6 +516,11 @@ def run_web_server(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
+                    slate_tts_segments = None
+                    scribe_tts_segments = None
+                    if voice_backend != "auto":   # handle voice backend on the client
+                       slate_tts_segments = []
+                       scribe_tts_segments = []
                     translated_text = process_audio_chunk(
                         audio_segment,
                         rate,
@@ -479,13 +538,17 @@ def run_web_server(
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
                         voice_model=voice_model,
+                        voice_match=voice_match,
                         timers=timers,
                         timing_stats=timing_stats,
                         scribe_backend=scribe_backend,
+                        slate_backend=slate_backend,
                         text_translation_target=current_output_lang,
                         langswap_enabled=langswap_enabled,
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
+                        slate_tts_segments=slate_tts_segments,
+                        scribe_tts_segments=scribe_tts_segments,
                     )
                     if translated_text:
                         # process_audio_chunk returns a dict with 'output', 'scribe', 'slate', and 'final_lang' keys
@@ -537,8 +600,20 @@ def run_web_server(
                             if verbose:
                                 print(f"[web] Sending translation with language: {lang_code} → {web_lang}")
                             
-                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang})
+                            slate_tts_payloads = []
+                            scribe_tts_payloads = []
+                            if slate_tts_segments:
+                                slate_tts_payloads = _serialize_tts_segments(slate_tts_segments, rate)
+                            if scribe_tts_segments:
+                                scribe_tts_payloads = _serialize_tts_segments(scribe_tts_segments, rate)       
+                          
+                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang, "has_slate_tts": bool(slate_tts_payloads), "has_scribe_tts": bool(scribe_tts_payloads)})
                             await websocket.send_text(message)
+                            if slate_tts_payloads:
+                                if verbose:
+                                    print(f"[web] Sending {len(slate_tts_payloads)} Slate TTS audio segments")
+                                for payload in slate_tts_payloads:
+                                    await websocket.send_text(json.dumps(payload))
         except WebSocketDisconnect:
             pass
         except Exception as exc:
@@ -641,10 +716,11 @@ def run_web_server(
             return
         # For all other exceptions, use the default handler
         loop.default_exception_handler(context)
-
+    _bypass_ = True
+    
     async def serve_with_exception_handler():
         """Wrapper to set exception handler for Windows compatibility."""
-        if os.name == 'nt':
+        if os.name == 'nt' and not _bypass_:
             loop = asyncio.get_event_loop()
             loop.set_exception_handler(suppress_windows_socket_errors)
         await server.serve()
