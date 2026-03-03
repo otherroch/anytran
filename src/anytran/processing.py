@@ -470,10 +470,16 @@ def process_audio_chunk(
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
     
-    # Synthesize slate audio (Translated)
-    # Also synthesize when LangSwap changed the target (even if Stage 2 was
-    # skipped because the new target is English).
-    if (stage2_ran or langswap_changed_target) and translated_text and slate_tts_segments is not None:
+    # Synthesize slate audio (Translated or final text)
+    # Fire when:
+    #   - Stage 2 ran (translation happened), OR
+    #   - LangSwap changed the target (even if Stage 2 was skipped because
+    #     the new target is English), OR
+    #   - Caller only requested slate TTS (scribe_tts_segments is None),
+    #     e.g. the web server path where we always want TTS for the final text.
+    if translated_text and slate_tts_segments is not None and (
+        stage2_ran or langswap_changed_target or scribe_tts_segments is None
+    ):
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             translated_text,

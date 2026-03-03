@@ -194,6 +194,17 @@ class TestLangSwapTtsGuard(unittest.TestCase):
         self.assertIn("stage2_ran or langswap_changed_target", self.source,
                        "Slate TTS guard should allow synthesis when LangSwap changed the target")
 
+    def test_slate_tts_guard_allows_slate_only_callers(self):
+        """Verify slate TTS fires when caller only provides slate_tts_segments (web server path).
+
+        When the web server path provides slate_tts_segments but not
+        scribe_tts_segments and no translation occurs, TTS should still
+        be generated for the final text.
+        """
+        self.assertIn("scribe_tts_segments is None", self.source,
+                       "Slate TTS guard should fire for slate-only callers "
+                       "(e.g. web server) even when stage2 didn't run")
+
 
 if __name__ == "__main__":
     unittest.main()
