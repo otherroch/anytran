@@ -345,6 +345,9 @@ def run_web_server(
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'translation') {
                             logLine(msg.text);
+                            if (!msg.has_audio) {
+                                speak(msg.text, msg.lang || 'en-US');
+                            }
                         } else if (msg.type === 'info') {
                             logLine('[info] ' + msg.text);
                         }
@@ -563,7 +566,10 @@ def run_web_server(
                             if verbose:
                                 print(f"[web] Sending translation with language: {lang_code} → {web_lang}")
                             
-                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang})
+                            has_tts_audio = any(
+                                pcm is not None and len(pcm) > 0 for pcm in slate_tts_segments
+                            )
+                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang, "has_audio": has_tts_audio})
                             await websocket.send_text(message)
                     # Send TTS audio as binary if available
                     for tts_pcm in slate_tts_segments:
