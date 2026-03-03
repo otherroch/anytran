@@ -114,5 +114,86 @@ class TestProcessAudioChunkPassesTtsSegments(unittest.TestCase):
                        "Client JS should detect ArrayBuffer binary messages")
 
 
+class TestWebServerAcceptsVoiceBackendParams(unittest.TestCase):
+    """Test that run_web_server accepts voice_backend, voice_model, and voice_match parameters."""
+
+    @classmethod
+    def setUpClass(cls):
+        web_server_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "anytran", "web_server.py"
+        )
+        with open(web_server_path, "r") as f:
+            cls.source = f.read()
+
+    def test_run_web_server_has_voice_backend_parameter(self):
+        """Verify run_web_server accepts voice_backend so CLI --voice-backend is respected."""
+        self.assertIn("voice_backend=None,", self.source,
+                       "run_web_server should accept voice_backend parameter")
+
+    def test_run_web_server_has_voice_model_parameter(self):
+        """Verify run_web_server accepts voice_model so CLI --voice-model is respected."""
+        self.assertIn("voice_model=None,", self.source,
+                       "run_web_server should accept voice_model parameter")
+
+    def test_run_web_server_has_voice_match_parameter(self):
+        """Verify run_web_server accepts voice_match so CLI --voice-match is respected."""
+        self.assertIn("voice_match=False,", self.source,
+                       "run_web_server should accept voice_match parameter")
+
+    def test_process_audio_chunk_receives_voice_match(self):
+        """Verify voice_match is passed to process_audio_chunk."""
+        self.assertIn("voice_match=voice_match", self.source,
+                       "process_audio_chunk call should pass voice_match")
+
+    def test_voice_backend_falls_back_to_env_var(self):
+        """Verify voice_backend falls back to USE_PIPER env var when not provided."""
+        self.assertIn('os.environ.get("USE_PIPER"', self.source,
+                       "Should fall back to USE_PIPER env var when voice_backend is None")
+
+
+class TestWebPipelinePassesVoiceParams(unittest.TestCase):
+    """Test that _run_web_pipeline passes voice params to run_web_server."""
+
+    @classmethod
+    def setUpClass(cls):
+        pipelines_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "anytran", "pipelines.py"
+        )
+        with open(pipelines_path, "r") as f:
+            cls.source = f.read()
+
+    def test_pipeline_passes_voice_backend(self):
+        """Verify _run_web_pipeline passes voice_backend from config."""
+        self.assertIn('voice_backend=config["voice_backend"]', self.source,
+                       "_run_web_pipeline should pass voice_backend to run_web_server")
+
+    def test_pipeline_passes_voice_model(self):
+        """Verify _run_web_pipeline passes voice_model from config."""
+        self.assertIn('voice_model=config["voice_model"]', self.source,
+                       "_run_web_pipeline should pass voice_model to run_web_server")
+
+    def test_pipeline_passes_voice_match(self):
+        """Verify _run_web_pipeline passes voice_match from config."""
+        self.assertIn('voice_match=config["voice_match"]', self.source,
+                       "_run_web_pipeline should pass voice_match to run_web_server")
+
+
+class TestLangSwapTtsGuard(unittest.TestCase):
+    """Test that slate TTS runs when LangSwap changes the target (even if Stage 2 skipped)."""
+
+    @classmethod
+    def setUpClass(cls):
+        processing_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "anytran", "processing.py"
+        )
+        with open(processing_path, "r") as f:
+            cls.source = f.read()
+
+    def test_slate_tts_guard_allows_langswap(self):
+        """Verify slate TTS guard includes langswap_changed_target condition."""
+        self.assertIn("stage2_ran or langswap_changed_target", self.source,
+                       "Slate TTS guard should allow synthesis when LangSwap changed the target")
+
+
 if __name__ == "__main__":
     unittest.main()

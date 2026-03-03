@@ -36,6 +36,9 @@ def run_web_server(
     dedup=False,
     keep_temp=False,
     lang_prefix=False,
+    voice_backend=None,
+    voice_model=None,
+    voice_match=False,
 ):
     """
     Start the real-time translation web server.
@@ -78,10 +81,12 @@ def run_web_server(
         name or model file base name). See the Piper documentation for the
         list of supported voices and installation instructions.
     """
-    # Read Piper TTS config from environment variables; see docstring above for details.
-    _use_piper = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
-    voice_backend = "piper" if _use_piper else "gtts"
-    voice_model = os.environ.get("PIPER_VOICE", None)
+    # Determine TTS backend: prefer explicit parameter, fall back to env vars.
+    if voice_backend is None:
+        _use_piper = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
+        voice_backend = "piper" if _use_piper else "gtts"
+    if voice_model is None:
+        voice_model = os.environ.get("PIPER_VOICE", None)
     try:
         from fastapi import FastAPI, WebSocket, WebSocketDisconnect
         from fastapi.responses import HTMLResponse
@@ -515,6 +520,7 @@ def run_web_server(
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
                         slate_tts_segments=slate_tts_segments,
+                        voice_match=voice_match,
                     )
                     if translated_text:
                         # process_audio_chunk returns a dict with 'output', 'scribe', 'slate', and 'final_lang' keys

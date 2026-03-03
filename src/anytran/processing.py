@@ -471,7 +471,9 @@ def process_audio_chunk(
             print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
     
     # Synthesize slate audio (Translated)
-    if stage2_ran and translated_text and slate_tts_segments is not None:
+    # Also synthesize when LangSwap changed the target (even if Stage 2 was
+    # skipped because the new target is English).
+    if (stage2_ran or langswap_changed_target) and translated_text and slate_tts_segments is not None:
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             translated_text,
