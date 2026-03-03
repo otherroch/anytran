@@ -370,7 +370,7 @@ def run_web_server(
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'translation') {
                             logLine(msg.text);
-                            if (!msg.has_slate_tts) {
+                            if (!msg.has_tts_audio) {
                                 speak(msg.text, msg.lang || 'en-US');
                             }
                         } else if (msg.type === 'tts_audio' && msg.pcm) {
@@ -537,7 +537,6 @@ def run_web_server(
                         stream_id="web",
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
-                        voice_model=voice_model,
                         voice_match=voice_match,
                         timers=timers,
                         timing_stats=timing_stats,
@@ -602,17 +601,29 @@ def run_web_server(
                             
                             slate_tts_payloads = []
                             scribe_tts_payloads = []
+                            has_tts_audio = False
                             if slate_tts_segments:
+                                has_tts_audio = True
+                                if verbose:
+                                    print(f"[web] Serializing {len(slate_tts_segments)} Slate TTS segments")    
                                 slate_tts_payloads = _serialize_tts_segments(slate_tts_segments, rate)
                             if scribe_tts_segments:
+                                
+                                if verbose:
+                                    print(f"[web] Serializing {len(scribe_tts_segments)} Scribe TTS segments")  
                                 scribe_tts_payloads = _serialize_tts_segments(scribe_tts_segments, rate)       
                           
-                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang, "has_slate_tts": bool(slate_tts_payloads), "has_scribe_tts": bool(scribe_tts_payloads)})
+                            message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang, "has_tts_audio": has_tts_audio})
                             await websocket.send_text(message)
                             if slate_tts_payloads:
                                 if verbose:
                                     print(f"[web] Sending {len(slate_tts_payloads)} Slate TTS audio segments")
                                 for payload in slate_tts_payloads:
+                                    await websocket.send_text(json.dumps(payload))
+                            elif scribe_tts_payloads:
+                                if verbose:
+                                    print(f"[web] Sending {len(scribe_tts_payloads)} Scribe TTS audio segments")
+                                for payload in scribe_tts_payloads:
                                     await websocket.send_text(json.dumps(payload))
         except WebSocketDisconnect:
             pass
