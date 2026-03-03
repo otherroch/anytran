@@ -258,6 +258,27 @@ def run_web_server(
             window.speechSynthesis.speak(utterance);
         }
 
+        function playPcmAudio(arrayBuffer) {
+            if (!audioEnabled) return;
+            try {
+                const playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const int16 = new Int16Array(arrayBuffer);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768;
+                }
+                const buffer = playbackCtx.createBuffer(1, float32.length, 16000);
+                buffer.getChannelData(0).set(float32);
+                const src = playbackCtx.createBufferSource();
+                src.buffer = buffer;
+                src.connect(playbackCtx.destination);
+                src.onended = () => playbackCtx.close();
+                src.start();
+            } catch (err) {
+                logLine('Audio playback error: ' + (err && err.message ? err.message : err));
+            }
+        }
+
         function enableAudio() {
             if (!('speechSynthesis' in window)) {
                 logLine('Speech synthesis not available in this browser.');
@@ -316,11 +337,14 @@ def run_web_server(
                 };
 
                 ws.onmessage = (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        playPcmAudio(event.data);
+                        return;
+                    }
                     try {
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'translation') {
                             logLine(msg.text);
-                            speak(msg.text, msg.lang || 'en-US');
                         } else if (msg.type === 'info') {
                             logLine('[info] ' + msg.text);
                         }
@@ -462,6 +486,7 @@ def run_web_server(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
+                    slate_tts_segments = []
                     translated_text = process_audio_chunk(
                         audio_segment,
                         rate,
@@ -486,6 +511,7 @@ def run_web_server(
                         langswap_enabled=langswap_enabled,
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
+                        slate_tts_segments=slate_tts_segments,
                     )
                     if translated_text:
                         # process_audio_chunk returns a dict with 'output', 'scribe', 'slate', and 'final_lang' keys
@@ -539,6 +565,10 @@ def run_web_server(
                             
                             message = json.dumps({"type": "translation", "text": output_text, "lang": web_lang})
                             await websocket.send_text(message)
+                    # Send TTS audio as binary if available
+                    for tts_pcm in slate_tts_segments:
+                        if tts_pcm is not None and len(tts_pcm) > 0:
+                            await websocket.send_bytes(tts_pcm.astype(np.int16).tobytes())
         except WebSocketDisconnect:
             pass
         except Exception as exc:

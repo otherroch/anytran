@@ -85,5 +85,34 @@ class TestWebServerErrorHandling(unittest.TestCase):
         loop.close()
 
 
+class TestProcessAudioChunkPassesTtsSegments(unittest.TestCase):
+    """Test that process_audio_chunk is called with slate_tts_segments in the web server."""
+
+    @classmethod
+    def setUpClass(cls):
+        web_server_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "anytran", "web_server.py"
+        )
+        with open(web_server_path, "r") as f:
+            cls.source = f.read()
+
+    def test_process_audio_chunk_receives_slate_tts_segments(self):
+        """Verify slate_tts_segments list is passed so TTS synthesis is triggered."""
+        self.assertIn("slate_tts_segments=slate_tts_segments", self.source,
+                       "process_audio_chunk call should pass slate_tts_segments")
+
+    def test_tts_audio_sent_as_binary(self):
+        """Verify TTS PCM audio from slate_tts_segments is sent as binary via WebSocket."""
+        self.assertIn("send_bytes", self.source,
+                       "WebSocket should send TTS audio as binary bytes")
+
+    def test_client_handles_binary_audio(self):
+        """Verify client-side JS handles binary ArrayBuffer messages for audio playback."""
+        self.assertIn("playPcmAudio", self.source,
+                       "Client JS should include playPcmAudio function for binary audio")
+        self.assertIn("instanceof ArrayBuffer", self.source,
+                       "Client JS should detect ArrayBuffer binary messages")
+
+
 if __name__ == "__main__":
     unittest.main()
