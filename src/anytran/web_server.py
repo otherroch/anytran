@@ -555,6 +555,7 @@ def run_web_server(
                         stream_id="web",
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
+                        voice_model=voice_model,
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
                         timers=timers,
