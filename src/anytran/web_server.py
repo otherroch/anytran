@@ -372,6 +372,8 @@ def run_web_server(
                             logLine(msg.text);
                             if (!msg.has_tts_audio) {
                                 speak(msg.text, msg.lang || 'en-US');
+                            } else {
+                                  nextAudioTime = 0;
                             }
                         } else if (msg.type === 'tts_audio' && msg.pcm) {
                             playPcm16Audio(msg.pcm, msg.rate || 16000);
