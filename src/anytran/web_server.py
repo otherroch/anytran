@@ -14,10 +14,10 @@ from .utils import normalize_lang_code, compute_window_params
 
 def _serialize_tts_segments(segments, rate):
     """Serialize PCM segments for websocket delivery."""
-    payloads = []
     if not segments:
-        return payloads
-
+        return None
+    
+    payloads = []
     for seg in segments:
         if seg is None:
             continue
@@ -376,10 +376,19 @@ def run_web_server(
                                   nextAudioTime = 0;
                             }
                         } else if (msg.type === 'tts_audio' && msg.pcm) {
+                            if (source && processor) {
+                                source.disconnect();
+                            }
                             playPcm16Audio(msg.pcm, msg.rate || 16000);
+                            if (source && processor) {
+                                source.connect(processor);
+                            }
                         } else if (msg.type === 'info') {
-                            logLine('[info] ' + msg.text);
-                        } 
+                            const infoText = msg.text || msg.message || msg.info;
+                            if (infoText) {
+                                logLine(infoText);
+                            }
+                        }
                     } catch (err) {
                         logLine('[error] Failed to parse message: ' + (err && err.message ? err.message : err));
                     }
@@ -522,8 +531,12 @@ def run_web_server(
                     scribe_tts_segments = None
                     if voice_backend != "auto":   # handle voice backend on the client
                        if current_output_lang == "en":
+                            if verbose:
+                                print(f"[web] Using Scribe TTS for English output") 
                             scribe_tts_segments = []
                        else:     
+                            if verbose:
+                                print(f"[web] Using Slate TTS for non-English output")
                             slate_tts_segments = []
                       
                     translated_text = process_audio_chunk(
@@ -675,11 +688,12 @@ def run_web_server(
     scheme = "https" if use_ssl else "http"
     print(f"Starting web server on {scheme}://{host}:{port}")
 
+    _debug = False
     config = uvicorn.Config(
         app,
         host=host,
         port=port,
-        log_level="info",
+        log_level="debug" if _debug else "info",
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
     )
