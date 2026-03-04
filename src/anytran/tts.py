@@ -515,7 +515,7 @@ def synthesize_tts_pcm_with_cloning(
         
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
-        explicit_voice_provided = piper_voice is not None
+        explicit_voice_provided = bool(piper_voice) and piper_voice != "en_US-lessac-medium"
         
         if (
             output_lang
