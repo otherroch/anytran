@@ -317,7 +317,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
 
     tts_pcm = None
     try:
-        if use_piper and piper_voice is None:
+        if use_piper and (piper_voice is None or piper_voice == "en_US-lessac-medium"):
             if (
                 _cached_matched_voice is not None
                 and output_lang is not None
