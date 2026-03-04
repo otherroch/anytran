@@ -321,21 +321,21 @@ def process_audio_chunk(
             text_translation_target = langswap_output_lang
             langswap_changed_target = True
             print(f"{prefix}DECISION: Detected language '{detected_base}' matches INPUT language '{input_base}'")
-            print(f"{prefix}ACTION:   Translating FROM {input_base} TO {langswap_output_lang}")
+            print(f"{prefix}ACTION:   Translating FROM {input_base} TO {langswap_output_lang}   *** TARGET CHANGE ***")
             print(f"{prefix}METHOD:   Stage 1 (Whisper) -> Stage 2 (Text Translation)")
         elif detected_base and output_base and detected_base == output_base:
             # Detected output language, translate to input language
             text_translation_target = langswap_input_lang
             langswap_changed_target = True
             print(f"{prefix}DECISION: Detected language '{detected_base}' matches OUTPUT language '{output_base}'")
-            print(f"{prefix}ACTION:   Translating FROM {output_base} TO {langswap_input_lang}")
+            print(f"{prefix}ACTION:   Translating FROM {output_base} TO {langswap_input_lang}   *** TARGET CHANGED ***")
             print(f"{prefix}METHOD:   Stage 1 (Whisper already translated to EN) -> Stage 2 (if needed)")
         else:
             # Could not determine which language, keep original target
             print(f"{prefix}DECISION: Detected language '{detected_base}' does NOT match either:")
             print(f"{prefix}           - Input: '{input_base}'")
             print(f"{prefix}           - Output: '{output_base}'")
-            print(f"{prefix}ACTION:   Using original translation target: {text_translation_target}")
+            print(f"{prefix}ACTION:   Using original translation target: {text_translation_target}   *** NO CHANGE ***")
             print(f"{prefix}NOTE:     This may indicate unexpected language detection")
         
         print(f"{prefix}New Translation Target: {text_translation_target}")
@@ -451,8 +451,35 @@ def process_audio_chunk(
     scribe_tts_pcm = None
     slate_tts_pcm = None
     
+    if langswap_changed_target and not stage2_ran and scribe_tts_segments is None and slate_tts_segments is not None:
+        if verbose:
+            prefix = f"[Stream {stream_id}] " if stream_id else ""
+            print(f"{prefix}NOTE: LangSwap changed translation target but Stage 2 was skipped (target is English)")
+            print(f"{prefix}  - This means the original target was English, so no text translation occurred")
+            print(f"{prefix}  - However, we will still synthesize TTS for the final text language (which may be non-English)")      
+        
+        t0 = time.perf_counter()
+        slate_tts_pcm = synthesize_tts_pcm_with_cloning(
+            english_text,
+            rate,
+            "en",
+            reference_audio=audio_segment if voice_match else None,
+            reference_sample_rate=rate,
+            voice_backend=voice_backend,
+            voice_model=voice_model,
+            voice_match=voice_match,
+            verbose=verbose,
+        )
+        add_timing(timings, "stage3_tts_synthesis", t0)
+        if verbose:
+            prefix = f"[Stream {stream_id}] " if stream_id else ""
+            print(f"{prefix}Stage 3 (TTS - Slate/English): Generated voice audio")
+            if slate_tts_pcm is not None:
+                print(f"{prefix}  - Slate TTS PCM length: {len(slate_tts_pcm)} samples")
+                
     # Synthesize scribe audio (English)
     if not stage2_ran and english_text and scribe_tts_segments is not None:
+
         t0 = time.perf_counter()
         scribe_tts_pcm = synthesize_tts_pcm_with_cloning(
             english_text,
@@ -468,10 +495,11 @@ def process_audio_chunk(
         add_timing(timings, "stage3_tts_synthesis", t0)
         if verbose:
             prefix = f"[Stream {stream_id}] " if stream_id else ""
-            print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
+            print(f"{prefix}Stage 3 (TTS - Scribe/en): Generated voice audio")
             if scribe_tts_pcm is not None:
                 print(f"{prefix}  - Scribe TTS PCM length: {len(scribe_tts_pcm)} samples")
-    
+                
+                
     # Synthesize slate audio (Translated)
     if stage2_ran and translated_text and slate_tts_segments is not None:
         t0 = time.perf_counter()
