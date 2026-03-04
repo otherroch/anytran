@@ -32,6 +32,17 @@ from .voice_matcher import (
 )
 
 
+# Module-level caches used to avoid repeated voice matching and model loading.
+# - _cached_matched_voice: the most recently selected voice for a given output
+#   language. This is reused as long as the requested output language does not change.
+# - _cached_output_lang: the language code associated with _cached_matched_voice.
+#   When the requested output language differs from this value, the cached voice
+#   should be considered invalid and recomputed.
+# - _piper_voice_cache: a mapping from model identifiers (e.g., file paths) to
+#   PiperVoice instances, so that models are loaded only once per process.
+# These caches are initialized at import time and are updated by helper functions
+# in this module; they are internal implementation details and should not be
+# modified directly by callers.
 _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
