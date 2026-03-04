@@ -519,8 +519,11 @@ def run_web_server(
                     slate_tts_segments = None
                     scribe_tts_segments = None
                     if voice_backend != "auto":   # handle voice backend on the client
-                       slate_tts_segments = []
-                       scribe_tts_segments = []
+                       if current_output_lang == "en":
+                            scribe_tts_segments = []
+                       else:     
+                            slate_tts_segments = []
+                      
                     translated_text = process_audio_chunk(
                         audio_segment,
                         rate,
