@@ -500,17 +500,17 @@ def synthesize_tts_pcm_with_cloning(
         return None
     
     try:
+       
+        # Only apply if user didn't explicitly specify a non-default voice
+        # Default voice is "en_US-lessac-medium"
+        explicit_voice_provided = piper_voice is not None
+        
         if (
             output_lang
             and _cached_matched_voice is not None
             and _cached_output_lang is not None
             and output_lang != _cached_output_lang
         ):
-        # Only apply if user didn't explicitly specify a non-default voice
-        # Default voice is "en_US-lessac-medium"
-        explicit_voice_provided = piper_voice is not None
-
-        if output_lang and _cached_matched_voice is not None and output_lang != _cached_output_lang:
             if verbose:
                 print(f"[TTS] Output language changed from {_cached_output_lang} to {output_lang}, resetting cached matched voice")
             _cached_matched_voice = None
