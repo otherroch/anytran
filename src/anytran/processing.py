@@ -452,7 +452,7 @@ def process_audio_chunk(
     slate_tts_pcm = None
     
     # Synthesize scribe audio (English)
-    if english_text and scribe_tts_segments is not None:
+    if not stage2_ran and english_text and scribe_tts_segments is not None:
         t0 = time.perf_counter()
         scribe_tts_pcm = synthesize_tts_pcm_with_cloning(
             english_text,
