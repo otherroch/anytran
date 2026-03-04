@@ -117,8 +117,12 @@ def _run_web_pipeline(args, config):
         timers=config["timers"],
         timers_all=config["timers_all"],
         scribe_backend=config["scribe_backend"],
+        slate_backend=config["slate_backend"],
         dedup=config["dedup"],
         lang_prefix=config["lang_prefix"],
+        voice_backend=config["voice_backend"],
+        voice_model=config["voice_model"],
+        voice_match=config["voice_match"],
     )
     return 0
 

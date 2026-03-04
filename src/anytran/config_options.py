@@ -53,7 +53,7 @@ def _get_default_config():
         "slate_model": None,
         "libretranslate_url": None,
         # Voice / TTS
-        "voice_backend": "gtts",
+        "voice_backend": "auto",
         "voice_model": "en_US-lessac-medium",
         "voice_lang": None,
         "voice_match": False,
