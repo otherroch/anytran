@@ -541,6 +541,7 @@ def run_web_server(
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
                         voice_match=voice_match,
+                        lang_prefix=lang_prefix,
                         timers=timers,
                         timing_stats=timing_stats,
                         scribe_backend=scribe_backend,
