@@ -291,7 +291,12 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
         print(f"TTS playback failed: {exc}")
 
 
-def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, cached_matched_voice=None, verbose=False):
+def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False):
+    
+    global _cached_matched_voice
+    global _cached_output_lang 
+    
+    
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
@@ -302,13 +307,20 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     tts_pcm = None
     try:
         if use_piper and piper_voice is None:
-            if cached_matched_voice is not None:
+            if (
+                _cached_matched_voice is not None
+                and output_lang is not None
+                and _cached_output_lang is not None
+                and output_lang == _cached_output_lang
+            ):
                 if verbose:
-                    print(f"[TTS] Using previously matched voice: {cached_matched_voice}")
-                piper_voice = cached_matched_voice
+                    print(f"[TTS] Using previously matched voice: {_cached_matched_voice}")
+                piper_voice = _cached_matched_voice
             elif lang_base == "en":
                 # For English, default to a commonly available voice
                 piper_voice = "en_US-lessac-medium"
+                _cached_matched_voice = piper_voice
+                _cached_output_lang = output_lang
                 if verbose:
                     print(f"[TTS] Defaulting to English Piper voice: {piper_voice}")    
             else:
@@ -325,6 +337,8 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                     if verbose:
                         print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
                     piper_voice = lang_voice
+                    _cached_matched_voice = piper_voice
+                    _cached_output_lang = output_lang   
                 else:
                     if verbose:
                         print(f"[TTS] No suitable Piper voice found for {output_lang}, will attempt gTTS fallback")     
@@ -486,12 +500,17 @@ def synthesize_tts_pcm_with_cloning(
         return None
     
     try:
-        # Auto voice matching with Piper
+        if (
+            output_lang
+            and _cached_matched_voice is not None
+            and _cached_output_lang is not None
+            and output_lang != _cached_output_lang
+        ):
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
         explicit_voice_provided = piper_voice is not None
 
-        if output_lang and output_lang != _cached_output_lang:
+        if output_lang and _cached_matched_voice is not None and output_lang != _cached_output_lang:
             if verbose:
                 print(f"[TTS] Output language changed from {_cached_output_lang} to {output_lang}, resetting cached matched voice")
             _cached_matched_voice = None
