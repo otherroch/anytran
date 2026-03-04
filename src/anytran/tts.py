@@ -490,8 +490,7 @@ def synthesize_tts_pcm_with_cloning(
     matched voice is stored in a module-level cache and reused for later
     calls to avoid repeated analysis.
     """ 
-    global _cached_matched_voice
-    global _cached_output_lang 
+  
     
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
@@ -500,7 +499,9 @@ def synthesize_tts_pcm_with_cloning(
         return None
     
     try:
-       
+        global _cached_matched_voice
+        global _cached_output_lang  
+        
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
         explicit_voice_provided = piper_voice is not None
