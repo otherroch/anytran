@@ -469,6 +469,8 @@ def process_audio_chunk(
         if verbose:
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}Stage 3 (TTS - Scribe/English): Generated voice audio")
+            if scribe_tts_pcm is not None:
+                print(f"{prefix}  - Scribe TTS PCM length: {len(scribe_tts_pcm)} samples")
     
     # Synthesize slate audio (Translated)
     if stage2_ran and translated_text and slate_tts_segments is not None:
@@ -488,7 +490,9 @@ def process_audio_chunk(
         if verbose:
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}Stage 3 (TTS - Slate/{tts_lang}): Generated voice audio")
-    
+            if slate_tts_pcm is not None:
+                print(f"{prefix}  - Slate TTS PCM length: {len(slate_tts_pcm)} samples")
+                
     # Legacy: tts_segments removed
 
     # Play audio output (if requested)

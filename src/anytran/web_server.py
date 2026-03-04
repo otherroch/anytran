@@ -599,16 +599,16 @@ def run_web_server(
                             if verbose:
                                 print(f"[web] Sending translation with language: {lang_code} → {web_lang}")
                             
-                            slate_tts_payloads = []
-                            scribe_tts_payloads = []
+                            slate_tts_payloads = None
+                            scribe_tts_payloads = None
                             has_tts_audio = False
                             if slate_tts_segments:
                                 has_tts_audio = True
                                 if verbose:
                                     print(f"[web] Serializing {len(slate_tts_segments)} Slate TTS segments")    
                                 slate_tts_payloads = _serialize_tts_segments(slate_tts_segments, rate)
-                            if scribe_tts_segments:
-                                
+                            elif scribe_tts_segments:
+                                has_tts_audio = True
                                 if verbose:
                                     print(f"[web] Serializing {len(scribe_tts_segments)} Scribe TTS segments")  
                                 scribe_tts_payloads = _serialize_tts_segments(scribe_tts_segments, rate)       
@@ -684,59 +684,19 @@ def run_web_server(
         server.should_exit = True
         server.force_exit = True
 
-    def install_windows_ctrl_handler():
-        if os.name != "nt":
-            return
-        try:
-            import ctypes
-
-            def _handler(ctrl_type):
-                if ctrl_type in (0, 1):
-                    signal_handler(signal.SIGINT, None)
-                    return True
-                return False
-
-            kernel32 = ctypes.windll.kernel32
-            handler_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
-            kernel32.SetConsoleCtrlHandler(handler_type(_handler), True)
-        except Exception:
-            pass
-
     signal.signal(signal.SIGINT, signal_handler)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, signal_handler)
 
-    install_windows_ctrl_handler()
-
-    import asyncio
-
-    def suppress_windows_socket_errors(loop, context):
-        """
-        Custom exception handler to suppress Windows-specific socket errors.
-        
-        On Windows, when a WebSocket connection is closed by the remote host,
-        the ProactorEventLoop may try to call shutdown() on an already closed socket,
-        resulting in a ConnectionResetError. This is a known issue and can be safely
-        suppressed as it doesn't affect the application's functionality.
-        
-        See: https://github.com/encode/uvicorn/issues/1316
-        """
-        exception = context.get('exception')
-        if isinstance(exception, ConnectionResetError):
-            # Suppress ConnectionResetError on Windows (WinError 10054)
-            return
-        # For all other exceptions, use the default handler
-        loop.default_exception_handler(context)
-    _bypass_ = True
-    
-    async def serve_with_exception_handler():
-        """Wrapper to set exception handler for Windows compatibility."""
-        if os.name == 'nt' and not _bypass_:
-            loop = asyncio.get_event_loop()
-            loop.set_exception_handler(suppress_windows_socket_errors)
-        await server.serve()
-
     try:
-        asyncio.run(serve_with_exception_handler())
-    except KeyboardInterrupt:
-        signal_handler(signal.SIGINT, None)
+        server.run()
+    except ConnectionResetError as exc:
+        # On Windows, uvicorn can raise spurious ConnectionResetError (WinError 10054)
+        # when client sockets disconnect abruptly. Suppress these only during shutdown.
+        if os.name == "nt" and (
+            getattr(server, "should_exit", False) or getattr(server, "force_exit", False)
+        ):
+            print(f"Ignoring Windows ConnectionResetError during server shutdown: {exc}")
+        else:
+            raise
+    
