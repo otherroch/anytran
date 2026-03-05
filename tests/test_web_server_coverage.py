@@ -8,12 +8,6 @@ from tests.conftest import _real_web_server_funcs as _WSF
 _run_web_server = _WSF["run_web_server"]
 _serialize_tts_segments = _WSF["_serialize_tts_segments"]
 
-try:
-    import fastapi  # noqa: F401
-    _HAS_FASTAPI = True
-except ImportError:
-    _HAS_FASTAPI = False
-
 
 class TestSerializeTtsSegments(unittest.TestCase):
     """Test the _serialize_tts_segments helper function."""
@@ -72,7 +66,6 @@ class TestSerializeTtsSegments(unittest.TestCase):
         self.assertEqual(result[0]["rate"], 22050)
 
 
-@unittest.skipUnless(_HAS_FASTAPI, "fastapi not installed — skipping run_web_server tests")
 class TestRunWebServerSetup(unittest.TestCase):
     """Test the run_web_server function setup code (before uvicorn.run is called)."""
 
