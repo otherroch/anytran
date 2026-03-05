@@ -1,8 +1,9 @@
-venv
-.venv
-docker-compose.yml
-chat
-models
-.mp3
-.txt
-.json
+!Dockerfile
+!pyproject.toml
+!entrypt.sh
+!.dockerignore
+!README.md
+!doc/
+!src/
+!tests/
+!venv/
