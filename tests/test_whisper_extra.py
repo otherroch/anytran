@@ -48,7 +48,7 @@ class TestResolveFasterWhisperModelPath(unittest.TestCase):
         return _WBF["_resolve_faster_whisper_model_path"](*args, **kwargs)
 
     def test_unknown_model_name_returns_none(self):
-        result = self._call("small")
+        result = self._call("nonexistent_model_xyz123")
         self.assertIsNone(result)
 
     def test_path_to_existing_directory_returned(self):
