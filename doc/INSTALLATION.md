@@ -2,7 +2,7 @@
 
 ## Linux system prerequisites
 
-On Linux, you may need to install the following system packages before installing Python dependencies (as used in the [dockerfile](../dockerfile)):
+On Linux, you may need to install the following system packages before installing Python dependencies (as used in the [Dockerfile](../Dockerfile)):
 
 ```bash
 sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
@@ -20,7 +20,7 @@ sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
 
 ## Docker images 
 
-- Built with `Dockerfile`
+- Built with [Dockerfile](../Dockerfile)
 - `docker pull otherroch/anytran`
 - `docker run -it --gpus all otherroch/anytran --help`  
 
