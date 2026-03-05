@@ -44,6 +44,12 @@ translategemma = ["transformers==4.57.3", "torch", "accelerate"]
 marianmt = ["transformers==4.57.3", "torch", "sentencepiece", "sacremoses"]
 
 [dependency-groups]
+# Lightweight group for running the test suite locally and in CI.
+dev = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pytest-cov",
+]
 all = [
   "av",
   "fastapi",
