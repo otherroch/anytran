@@ -18,6 +18,8 @@ build
 *.log
 *.bak
 *.tmp
+.coverage
+htmlcov/
 *.swp
 *.swo
 *.DS_Store
