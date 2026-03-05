@@ -530,11 +530,11 @@ def run_web_server(
                     slate_tts_segments = None
                     scribe_tts_segments = None
                     if voice_backend != "auto":   # handle voice backend on the client
-                       if current_output_lang == "en":
+                        if current_output_lang == "en":
                             if verbose:
-                                print(f"[web] Using Scribe TTS for English output") 
+                                print(f"[web] Using Scribe TTS for English output")
                             scribe_tts_segments = []
-                       else:     
+                        else:
                             if verbose:
                                 print(f"[web] Using Slate TTS for non-English output")
                             slate_tts_segments = []
@@ -697,6 +697,7 @@ def run_web_server(
         log_level="debug" if _debug else "info",
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
+        timeout_graceful_shutdown=5.0,
     )
     server = uvicorn.Server(config)
 
