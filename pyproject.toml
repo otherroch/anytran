@@ -69,6 +69,8 @@ all = [
   "transformers==4.57.3",
   "sentencepiece",
   "sacremoses",
+  "silero-vad",
+  "pytest-cov",
 ]
 
 [project.scripts]
