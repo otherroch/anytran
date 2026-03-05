@@ -11,6 +11,18 @@ sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
 ## GPU support
 
 - you may need to install the appropriate torch version (see https://pytorch.org/get-started/locally/)
+- for example:
+
+   ` pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130`
+## Development environment
+
+- `pip install --group dev --group all -e .[all]`
+
+## Docker images 
+
+- Built with `Dockerfile`
+- `docker pull otherroch/anytran`
+- `docker run -it --gpus all otherroch/anytran --help`  
 
 ## Install pywhispercpp on CUDA GPU (optional feature)
 

@@ -27,7 +27,8 @@
   - `conda activate anytran`
 
 - Install all features
-  - `pip install -e .[all]`
+  - `pip install --group all -e .[all]`
+    (may require `pip install -U pip`)
 
 - For individual feature installs, GPU support, or Linux system prerequisites, see [INSTALLATION.md](doc/INSTALLATION.md)
 
