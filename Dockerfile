@@ -21,7 +21,7 @@ RUN pip install -U pip
 RUN pip install --group all
 
 
-COPY Dockerfile .dockerignore entrypt.sh /app
+COPY Dockerfile .dockerignore entrypt.sh /app/
 COPY tests /app/tests
 COPY doc /app/doc
 COPY src /app/src
