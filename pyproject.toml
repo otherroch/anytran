@@ -49,6 +49,7 @@ dev = [
   "fastapi",
   "uvicorn[standard]",
   "pytest-cov",
+  "cryptography",
 ]
 all = [
   "av",
@@ -76,7 +77,6 @@ all = [
   "sentencepiece",
   "sacremoses",
   "silero-vad",
-  "pytest-cov",
 ]
 
 [project.scripts]
