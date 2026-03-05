@@ -34,8 +34,12 @@ import librosa  # noqa: F401 — must be before test_looptran stubs torch (libro
 import paho.mqtt.client  # noqa: F401
 # fastapi and uvicorn are imported INSIDE run_web_server() (not at module level
 # in web_server.py), so we pre-import them here before the stubs take effect.
-import fastapi  # noqa: F401
-import uvicorn  # noqa: F401
+# These are optional dependencies — tolerate missing installs gracefully.
+try:
+    import fastapi  # noqa: F401
+    import uvicorn  # noqa: F401
+except ImportError:
+    pass
 
 # anytran modules that the new coverage tests exercise directly
 import anytran.whisper_backend  # noqa: F401
@@ -45,6 +49,7 @@ import anytran.voice_matcher  # noqa: F401
 import anytran.tts  # noqa: F401
 import anytran.chatlog  # noqa: F401
 import anytran.certs  # noqa: F401
+import anytran.stream_youtube  # noqa: F401 — prevent test_looptran.py from stubbing it
 
 # Pre-import web_server (and its transitive deps: processing, mqtt_client)
 # so that test_looptran.py's stubs can't replace them.
