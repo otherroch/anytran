@@ -78,3 +78,9 @@ anytran = "anytran.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/anytran"]
+
+[tool.pytest.ini_options]
+# Add the project root to sys.path so that `from tests.conftest import …`
+# works on all platforms (Windows, Linux, macOS) without needing a
+# tests/__init__.py file.
+pythonpath = ["."]
