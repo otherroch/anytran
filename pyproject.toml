@@ -87,6 +87,7 @@ packages = ["src/anytran"]
 
 [tool.pytest.ini_options]
 # Add the project root to sys.path so that `from tests.conftest import …`
-# works on all platforms (Windows, Linux, macOS) without needing a
-# tests/__init__.py file.
+# resolves correctly on all platforms (Windows, Linux, macOS).
+# tests/__init__.py makes 'tests' a proper package so pytest registers
+# conftest as 'tests.conftest' rather than plain 'conftest'.
 pythonpath = ["."]
