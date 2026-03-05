@@ -42,6 +42,8 @@ googletrans = ["googletrans==4.0.0rc1", "httpcore==0.9.1", "httpx==0.13.3", "hug
 libretranslate = ["requests", "libretranslate"]
 translategemma = ["transformers==4.57.3", "torch", "accelerate"]
 marianmt = ["transformers==4.57.3", "torch", "sentencepiece", "sacremoses"]
+
+[dependency-groups]
 all = [
   "av",
   "fastapi",
