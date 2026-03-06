@@ -126,7 +126,7 @@ def run_realtime_youtube(
     # across overlapping chunks.
     recent_slate_outputs = [] if dedup else None
     recent_scribe_outputs = [] if dedup else None
-    dedup_window_size = 10 if dedup else None  # Check last 10 outputs
+    dedup_window_size = 10  # Check last 10 outputs
     # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
     last_written_scribe = None
     last_written_slate = None
