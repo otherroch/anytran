@@ -267,7 +267,6 @@ def run_realtime_youtube(
                 if result:
                     scribe_output = result.get('scribe')
                     slate_output = result.get('slate')
-                    
                     if scribe_output and scribe_output != last_written_scribe:
                         if scribe_file:
                             if normalize:
