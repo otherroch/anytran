@@ -298,3 +298,48 @@ def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path
     np.testing.assert_allclose(output_calls[0][1], np.array([1.0, 2.0, 3.0], dtype=np.float32))
     assert output_calls[1][0] == str(slate_audio_path)
     np.testing.assert_allclose(output_calls[1][1], np.array([2.0, 4.0, 6.0], dtype=np.float32))
+
+
+@pytest.mark.parametrize(
+    "dedup_flag,expected_lines",
+    [
+        (False, ["same", "same"]),
+        (True, ["same"]),
+    ],
+)
+def test_run_realtime_youtube_respects_dedup_flag(monkeypatch, tmp_path, runner_modules, dedup_flag, expected_lines):
+    _, _, rry = runner_modules
+    monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: "vid123")
+    monkeypatch.setattr(rry, "validate_youtube_video", lambda *args, **kwargs: {"contentDetails": {"duration": "PT5S"}})
+    monkeypatch.setattr(rry, "parse_iso8601_duration", lambda duration: 5)
+    monkeypatch.setattr(rry.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rry, "compute_window_params", lambda *args, **kwargs: (2, 0))
+    monkeypatch.setattr(rry.shutil, "which", lambda name: "runtime" if name == "node" else None)
+    monkeypatch.setattr(rry, "get_youtube_audio_stream_url", lambda *args, **kwargs: "http://example.com/audio")
+
+    def fake_stream(resolve_audio_url, audio_queue, rate, stop_flag, expected_duration, max_retries, verbose, _):
+        resolve_audio_url()
+        audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        audio_queue.put(np.array([0.3], dtype=np.float32))
+
+    monkeypatch.setattr(rry, "stream_youtube_audio", fake_stream)
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        return {"scribe": "same", "slate": "same"}
+
+    monkeypatch.setattr(rry, "process_audio_chunk", fake_process_audio_chunk)
+
+    scribe_text_file = tmp_path / "yt_flag_scribe.txt"
+    slate_text_file = tmp_path / "yt_flag_slate.txt"
+
+    rry.run_realtime_youtube(
+        "https://youtube.com/watch?v=vid123",
+        "api-key",
+        scribe_text_file=str(scribe_text_file),
+        slate_text_file=str(slate_text_file),
+        dedup=dedup_flag,
+        normalize=False,
+    )
+
+    assert scribe_text_file.read_text(encoding="utf-8").splitlines() == expected_lines
+    assert slate_text_file.read_text(encoding="utf-8").splitlines() == expected_lines
