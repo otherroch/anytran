@@ -7,20 +7,32 @@ import pytest
 
 @pytest.fixture
 def runner_modules():
-    for name in [
+    module_names = [
         "anytran.runners.run_file_input",
         "anytran.runners.run_realtime_output",
         "anytran.runners.run_realtime_youtube",
         "anytran.runners",
         "anytran.stream_output",
         "anytran.stream_youtube",
+    ]
+    original_modules = {name: sys.modules.get(name) for name in module_names}
+    for name in [
+        *module_names
     ]:
         sys.modules.pop(name, None)
-    return (
+    modules = (
         importlib.import_module("anytran.runners.run_file_input"),
         importlib.import_module("anytran.runners.run_realtime_output"),
         importlib.import_module("anytran.runners.run_realtime_youtube"),
     )
+    try:
+        yield modules
+    finally:
+        for name, module in original_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path, runner_modules):
@@ -102,7 +114,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
         if slate_segments is not None:
             slate_segments.append(np.array([2.0, 2.0], dtype=np.float32))
         idx = len(process_calls)
-        return {"scribe": f"scribe-{idx}", "slate": "SAME"}
+        return {"scribe": f"scribe-{idx}", "slate": "SLATE-UNCHANGED"}
 
     output_calls = []
     monkeypatch.setattr(rfi, "process_audio_chunk", fake_process_audio_chunk)
@@ -123,7 +135,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
     assert len(process_calls) == 2
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == ["SCRIBE-1", "SCRIBE-2"]
-    assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["SAME"]
+    assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["SLATE-UNCHANGED"]
     assert output_calls[0][0] == str(scribe_audio_path)
     np.testing.assert_allclose(output_calls[0][1], np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32))
     assert output_calls[1][0] == str(slate_audio_path)
