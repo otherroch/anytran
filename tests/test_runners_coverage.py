@@ -15,7 +15,7 @@ def runner_modules():
         "anytran.stream_output",
         "anytran.stream_youtube",
     ]
-    original_modules = {name: sys.modules.get(name) for name in module_names}
+    original_module_states = {name: sys.modules.get(name) for name in module_names}
     for name in module_names:
         sys.modules.pop(name, None)
     modules = (
@@ -26,7 +26,7 @@ def runner_modules():
     try:
         yield modules
     finally:
-        for name, module in original_modules.items():
+        for name, module in original_module_states.items():
             if module is None:
                 sys.modules.pop(name, None)
             else:
@@ -105,7 +105,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
     process_calls = []
 
-    slate_outputs_seen = []
+    slate_outputs_produced = []
 
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
         process_calls.append(np.array(audio_segment))
@@ -117,8 +117,8 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
             slate_segments.append(np.array([2.0, 2.0], dtype=np.float32))
         idx = len(process_calls)
         # Return the same slate output so deduplication keeps only the first write.
-        slate_outputs_seen.append("SLATE-UNCHANGED")
-        return {"scribe": f"scribe-{idx}", "slate": slate_outputs_seen[-1]}
+        slate_outputs_produced.append("SLATE-UNCHANGED")
+        return {"scribe": f"scribe-{idx}", "slate": slate_outputs_produced[-1]}
 
     output_calls = []
     monkeypatch.setattr(rfi, "process_audio_chunk", fake_process_audio_chunk)
@@ -138,7 +138,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
     )
 
     assert len(process_calls) == 2
-    assert len(slate_outputs_seen) == 2  # both chunks produced slate output but only one was written
+    assert len(slate_outputs_produced) == 2  # both chunks produced slate output but only one was written
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == ["SCRIBE-1", "SCRIBE-2"]
     assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["SLATE-UNCHANGED"]
     assert output_calls[0][0] == str(scribe_audio_path)
@@ -150,9 +150,9 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 def test_run_realtime_output_non_windows_returns(monkeypatch, runner_modules):
     _, rro, _ = runner_modules
     monkeypatch.setattr(sys, "platform", "linux")
-    def _should_not_call(*args, **kwargs):
+    def _fail_if_called(*args, **kwargs):
         raise AssertionError("should not be called")
-    monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", _should_not_call)
+    monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", _fail_if_called)
     assert rro.run_realtime_output() is None
 
 
@@ -221,9 +221,9 @@ def test_run_realtime_youtube_invalid_url(monkeypatch, runner_modules):
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: None)
     called = {}
 
-    def _validate_should_not_be_called(*args, **kwargs):
+    def _fail_if_called(*args, **kwargs):
         called["unexpected"] = True
-    monkeypatch.setattr(rry, "validate_youtube_video", _validate_should_not_be_called)
+    monkeypatch.setattr(rry, "validate_youtube_video", _fail_if_called)
 
     assert rry.run_realtime_youtube("bad-url", "key") is None
     assert "unexpected" not in called
