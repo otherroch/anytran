@@ -16,9 +16,7 @@ def runner_modules():
         "anytran.stream_youtube",
     ]
     original_modules = {name: sys.modules.get(name) for name in module_names}
-    for name in [
-        *module_names
-    ]:
+    for name in module_names:
         sys.modules.pop(name, None)
     modules = (
         importlib.import_module("anytran.runners.run_file_input"),
@@ -114,6 +112,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
         if slate_segments is not None:
             slate_segments.append(np.array([2.0, 2.0], dtype=np.float32))
         idx = len(process_calls)
+        # Return the same slate output to ensure deduplication skips the second write.
         return {"scribe": f"scribe-{idx}", "slate": "SLATE-UNCHANGED"}
 
     output_calls = []
