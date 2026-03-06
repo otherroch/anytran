@@ -105,7 +105,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
     process_calls = []
 
-    slate_outputs_produced = []
+    slate_outputs = 0
 
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
         process_calls.append(np.array(audio_segment))
@@ -117,8 +117,9 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
             slate_segments.append(np.array([2.0, 2.0], dtype=np.float32))
         idx = len(process_calls)
         # Return the same slate output so deduplication keeps only the first write.
-        slate_outputs_produced.append("SLATE-UNCHANGED")
-        return {"scribe": f"scribe-{idx}", "slate": slate_outputs_produced[-1]}
+        nonlocal slate_outputs
+        slate_outputs += 1
+        return {"scribe": f"scribe-{idx}", "slate": "SLATE-UNCHANGED"}
 
     output_calls = []
     monkeypatch.setattr(rfi, "process_audio_chunk", fake_process_audio_chunk)
@@ -138,7 +139,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
     )
 
     assert len(process_calls) == 2
-    assert len(slate_outputs_produced) == 2  # both chunks produced slate output but only one was written
+    assert slate_outputs == 2  # both chunks produced slate output but only one was written
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == ["SCRIBE-1", "SCRIBE-2"]
     assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["SLATE-UNCHANGED"]
     assert output_calls[0][0] == str(scribe_audio_path)
