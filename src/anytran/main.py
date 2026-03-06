@@ -162,7 +162,7 @@ Examples:
     
     # Voice (TTS) options
     voice_group = parser.add_argument_group("voice options (text-to-speech / Stage 3)")
-    voice_group.add_argument("--voice-backend", type=str, default="auto", choices=["piper", "gtts", "auto"], help="TTS backend. 'auto' (default) prefers Piper if available and falls back to gTTS otherwise. Use 'piper' to force Piper TTS or 'gtts' to force Google TTS.")
+    voice_group.add_argument("--voice-backend", type=str, default="auto", choices=["piper", "gtts", "auto", "chatterbox"], help="TTS backend. 'auto' (default) prefers Piper if available and falls back to gTTS otherwise. Use 'piper' to force Piper TTS, 'gtts' to force Google TTS, or 'chatterbox' for Chatterbox TTS (supports multilingual zero-shot voice cloning).")
     voice_group.add_argument("--voice-model", type=str, default="en_US-lessac-medium", help="Voice model name for TTS (default: en_US-lessac-medium). Used as the Piper voice model when --voice-backend piper is selected.")
     voice_group.add_argument("--voice-lang", type=str, help="Override TTS language")
     voice_group.add_argument("--voice-match", action="store_true", help="Auto-select Piper voice based on input voice characteristics")
@@ -523,6 +523,15 @@ def _validate_pipeline_args(args, parser):
                 args.voice_backend = "gtts"
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print("Warning: --voice-backend piper specified but Piper not found.")
+            print("Falling back to gTTS.")
+            args.voice_backend = "gtts"
+
+    # Chatterbox check
+    if args.voice_backend == "chatterbox":
+        from anytran.tts import CHATTERBOX_MTL_AVAILABLE, CHATTERBOX_TURBO_AVAILABLE
+        if not CHATTERBOX_MTL_AVAILABLE and not CHATTERBOX_TURBO_AVAILABLE:
+            print("Warning: --voice-backend chatterbox specified but chatterbox-tts is not installed.")
+            print("Install it with: pip install chatterbox-tts")
             print("Falling back to gTTS.")
             args.voice_backend = "gtts"
 
