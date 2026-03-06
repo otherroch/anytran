@@ -33,7 +33,7 @@ def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path
     output_calls = []
 
     def fake_translate_text(text, source_lang=None, target_lang=None, backend=None, verbose=False):
-        translate_calls.append((text, source_lang, target_lang, backend))
+        translate_calls.append((text, source_lang, target_lang, backend, verbose))
         return f"{target_lang}:{text}"
 
     def fake_split(text):
@@ -69,6 +69,7 @@ def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path
         output_audio_path=str(scribe_audio_path),
         slate_audio_path=str(slate_audio_path),
         timers_all=True,
+        verbose=True,
     )
 
     assert len(translate_calls) == 3  # two sentences to English, one to French
@@ -76,6 +77,7 @@ def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path
         ("en:hola en:adios", 16000, "en"),
         ("fr:en:hola en:adios", 16000, "fr"),
     ]
+    assert all(call[-1] is True for call in translate_calls)
     assert output_calls[0][0] == str(scribe_audio_path)
     assert output_calls[1][0] == str(slate_audio_path)
     assert scribe_text_file.read_text(encoding="utf-8") == "EN:HOLA EN:ADIOS\n"
@@ -131,11 +133,9 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 def test_run_realtime_output_non_windows_returns(monkeypatch, runner_modules):
     _, rro, _ = runner_modules
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(
-        rro,
-        "get_wasapi_loopback_device_info",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not be called")),
-    )
+    def _should_not_call(*args, **kwargs):
+        raise AssertionError("should not be called")
+    monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", _should_not_call)
     assert rro.run_realtime_output() is None
 
 
@@ -211,7 +211,11 @@ def test_run_realtime_youtube_invalid_url(monkeypatch, runner_modules):
 def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path, runner_modules):
     _, _, rry = runner_modules
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: "vid123")
-    monkeypatch.setattr(rry, "validate_youtube_video", lambda key, vid, verbose=False: {"contentDetails": {"duration": "PT5S"}})
+    validate_calls = {}
+    def fake_validate(api_key, vid, verbose=False):
+        validate_calls["called"] = verbose
+        return {"contentDetails": {"duration": "PT5S"}}
+    monkeypatch.setattr(rry, "validate_youtube_video", fake_validate)
     monkeypatch.setattr(rry, "parse_iso8601_duration", lambda duration: 5)
     monkeypatch.setattr(rry.signal, "signal", lambda *args, **kwargs: None)
     monkeypatch.setattr(rry, "compute_window_params", lambda *args, **kwargs: (4, 1))
@@ -267,6 +271,7 @@ def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path
     assert call_count["n"] == 3  # two chunks in loop, one final buffer
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == ["SCRIBE-1", "SCRIBE-2", "SCRIBE-3"]
     assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["SLATE-1", "SLATE-2", "SLATE-3"]
+    assert validate_calls["called"] is True
     assert output_calls[0][0] == str(scribe_audio_path)
     np.testing.assert_allclose(output_calls[0][1], np.array([1.0, 2.0, 3.0], dtype=np.float32))
     assert output_calls[1][0] == str(slate_audio_path)
