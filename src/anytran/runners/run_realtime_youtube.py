@@ -127,6 +127,8 @@ def run_realtime_youtube(
     recent_slate_outputs = []
     recent_scribe_outputs = []
     dedup_window_size = 10  # Check last 10 outputs
+    last_scribe_output = None
+    last_slate_output = None
 
     stream_thread = threading.Thread(
         target=stream_youtube_audio,
@@ -195,7 +197,8 @@ def run_realtime_youtube(
                             recent_scribe_outputs.append(scribe_output)
                             if len(recent_scribe_outputs) > dedup_window_size:
                                 recent_scribe_outputs.pop(0)
-                        
+                            last_scribe_output = scribe_output
+
                         if slate_output and slate_output not in recent_slate_outputs:
                             if slate_file:
                                 if normalize:
@@ -205,6 +208,7 @@ def run_realtime_youtube(
                             recent_slate_outputs.append(slate_output)
                             if len(recent_slate_outputs) > dedup_window_size:
                                 recent_slate_outputs.pop(0)
+                            last_slate_output = slate_output
             except Empty:
                 idle_seconds += 1
                 if not stream_thread.is_alive():
