@@ -321,6 +321,8 @@ def test_run_realtime_youtube_respects_dedup_flag(monkeypatch, tmp_path, runner_
         resolve_audio_url()
         audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
         audio_queue.put(np.array([0.3], dtype=np.float32))
+        # Signal that streaming is complete so the runner can exit promptly
+        stop_flag.set()
         time.sleep(0.05)
         stop_flag.set()
 
