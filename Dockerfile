@@ -1,6 +1,8 @@
-# Use an official Python runtime as a parent image
-# FROM python:3.12-slim
-FROM nvidia/cuda:13.1.0-devel-ubuntu24.04
+# can be set at build time with --build-arg BASE_IMAGE=your_image:tag
+# for arm64 use: debian:12-slim 
+# for x86_64 use: nvidia/cuda:13.1.1-devel-ubuntu24.04 or nvidia/cuda:13.1.1-runtime-ubuntu24.04
+ARG BASE_IMAGE=nvidia/cuda:13.1.1-runtime-ubuntu24.04
+FROM ${BASE_IMAGE}
 
 # Set the working directory in the container
 WORKDIR /app
