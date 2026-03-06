@@ -414,7 +414,7 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
         print(f"TTS playback failed: {exc}")
 
 
-def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False, chatterbox_ref_audio_path=None):
+def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False):
     
     global _cached_matched_voice
     global _cached_output_lang 
@@ -440,7 +440,6 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 chatterbox_success = chatterbox_tts(
                     translated_text,
                     tts_fp_path,
-                    reference_audio_path=chatterbox_ref_audio_path,
                     output_lang=lang_base,
                     use_turbo=use_turbo,
                     verbose=verbose,
@@ -669,9 +668,12 @@ def synthesize_tts_pcm_with_cloning(
         global _cached_output_lang  
 
         # --- Chatterbox backend ---
-        # When voice_match is enabled, the reference audio is passed directly
-        # as an audio prompt for zero-shot voice cloning.
+        # When voice_match is enabled, the reference audio is saved to a temp WAV
+        # and passed directly as an audio prompt for zero-shot voice cloning.
+        # Without voice_match, plain synthesis is performed (no reference audio).
         if use_chatterbox:
+            import builtins
+            lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
             chatterbox_ref_audio_path = None
             if voice_match and reference_audio is not None:
                 if verbose:
@@ -693,19 +695,42 @@ def synthesize_tts_pcm_with_cloning(
                 if verbose:
                     print("⚠ --voice-match requested for chatterbox but no reference audio available")
 
+            tts_fp_path = None
             try:
-                tts_pcm = synthesize_tts_pcm(
-                    translated_text, rate, output_lang,
-                    voice_backend="chatterbox",
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                    tts_fp_path = tts_fp.name
+                use_turbo = lang_base == "en"
+                cb_success = chatterbox_tts(
+                    translated_text,
+                    tts_fp_path,
+                    reference_audio_path=chatterbox_ref_audio_path,
+                    output_lang=lang_base,
+                    use_turbo=use_turbo,
                     verbose=verbose,
-                    chatterbox_ref_audio_path=chatterbox_ref_audio_path,
                 )
+                if cb_success:
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Chatterbox synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                if verbose:
+                    print("[TTS] Chatterbox failed, falling back to gTTS")
+            except Exception as cb_exc:
+                if verbose:
+                    print(f"[TTS] Chatterbox synthesis failed: {cb_exc}")
             finally:
+                if tts_fp_path and os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
                 if chatterbox_ref_audio_path and os.path.exists(chatterbox_ref_audio_path):
-                    import builtins
                     if not getattr(builtins, "KEEP_TEMP", False):
                         os.remove(chatterbox_ref_audio_path)
-            return tts_pcm
+            # Chatterbox failed – fall through to gTTS
+            return synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", verbose=verbose)
 
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
