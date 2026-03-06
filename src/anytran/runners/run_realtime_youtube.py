@@ -127,7 +127,7 @@ def run_realtime_youtube(
     recent_slate_outputs = []
     recent_scribe_outputs = []
     dedup_window_size = 10  # Check last 10 outputs
-    # Track last outputs to avoid duplicating the final buffer writes.
+    # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
     last_scribe_output = None
     last_slate_output = None
 
