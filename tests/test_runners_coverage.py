@@ -200,9 +200,9 @@ def test_run_realtime_youtube_invalid_url(monkeypatch, runner_modules):
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: None)
     called = {}
 
-    def _unexpected(*args, **kwargs):
+    def _validate_should_not_be_called(*args, **kwargs):
         called["unexpected"] = True
-    monkeypatch.setattr(rry, "validate_youtube_video", _unexpected)
+    monkeypatch.setattr(rry, "validate_youtube_video", _validate_should_not_be_called)
 
     assert rry.run_realtime_youtube("bad-url", "key") is None
     assert "unexpected" not in called
