@@ -8,6 +8,18 @@ try:
 except ImportError:
     PiperVoice = None
     PIPER_PYTHON_AVAILABLE = False
+try:
+    from chatterbox.tts_turbo import ChatterboxTurboTTS
+    CHATTERBOX_TURBO_AVAILABLE = True
+except ImportError:
+    ChatterboxTurboTTS = None
+    CHATTERBOX_TURBO_AVAILABLE = False
+try:
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    CHATTERBOX_MTL_AVAILABLE = True
+except ImportError:
+    ChatterboxMultilingualTTS = None
+    CHATTERBOX_MTL_AVAILABLE = False
 import tempfile
 
 import librosa
@@ -40,12 +52,15 @@ from .voice_matcher import (
 #   should be considered invalid and recomputed.
 # - _piper_voice_cache: a mapping from model identifiers (e.g., file paths) to
 #   PiperVoice instances, so that models are loaded only once per process.
+# - _chatterbox_model_cache: cached Chatterbox model instances keyed by model
+#   variant ("turbo" or "mtl") so they are loaded only once per process.
 # These caches are initialized at import time and are updated by helper functions
 # in this module; they are internal implementation details and should not be
 # modified directly by callers.
 _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
+_chatterbox_model_cache = {}
 
 
 def _find_piper_config_path(model_path):
@@ -235,6 +250,103 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
         return False
 
 
+def _get_torch_device():
+    """Return the best available torch device string ('cuda', 'mps', or 'cpu')."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def chatterbox_tts(text, output_wav, reference_audio_path=None, output_lang=None, use_turbo=False, verbose=False):
+    """
+    Synthesize speech using Chatterbox TTS and write the result to ``output_wav``.
+
+    Parameters
+    ----------
+    text : str
+        Text to synthesize.
+    output_wav : str
+        Path to the output WAV file.
+    reference_audio_path : str or None
+        Path to a reference audio clip used for zero-shot voice cloning.
+        When provided the synthesized voice will match the reference speaker.
+    output_lang : str or None
+        BCP-47 / ISO-639-1 language code for the target language (e.g. ``"fr"``).
+        Used only with the multilingual model.  Defaults to ``"en"`` when not set.
+    use_turbo : bool
+        When ``True``, prefer the Turbo model (English-only, lower compute).
+        When ``False`` (default), use the Multilingual model.
+    verbose : bool
+        Print progress information.
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` on failure.
+    """
+    global _chatterbox_model_cache
+
+    try:
+        import torch
+        import torchaudio as ta
+
+        device = _get_torch_device()
+
+        lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
+        # Turbo is English-only; fall back to multilingual for other languages.
+        use_turbo_effective = use_turbo and lang_base == "en" and CHATTERBOX_TURBO_AVAILABLE
+
+        if use_turbo_effective:
+            cache_key = "turbo"
+            if cache_key not in _chatterbox_model_cache:
+                if verbose:
+                    print(f"[Chatterbox] Loading Turbo model on {device}...")
+                _chatterbox_model_cache[cache_key] = ChatterboxTurboTTS.from_pretrained(device=device)
+                if verbose:
+                    print("[Chatterbox] Turbo model loaded.")
+            model = _chatterbox_model_cache[cache_key]
+            generate_kwargs = {}
+            if reference_audio_path:
+                generate_kwargs["audio_prompt_path"] = reference_audio_path
+            if verbose:
+                print(f"[Chatterbox] Generating (Turbo) text='{text[:60]}...' ref={reference_audio_path}")
+            wav = model.generate(text, **generate_kwargs)
+        else:
+            if not CHATTERBOX_MTL_AVAILABLE:
+                if verbose:
+                    print("[Chatterbox][ERROR] ChatterboxMultilingualTTS not available. Install chatterbox-tts.")
+                return False
+            cache_key = "mtl"
+            if cache_key not in _chatterbox_model_cache:
+                if verbose:
+                    print(f"[Chatterbox] Loading Multilingual model on {device}...")
+                _chatterbox_model_cache[cache_key] = ChatterboxMultilingualTTS.from_pretrained(device=device)
+                if verbose:
+                    print("[Chatterbox] Multilingual model loaded.")
+            model = _chatterbox_model_cache[cache_key]
+            generate_kwargs = {"language_id": lang_base}
+            if reference_audio_path:
+                generate_kwargs["audio_prompt_path"] = reference_audio_path
+            if verbose:
+                print(f"[Chatterbox] Generating (Multilingual, lang={lang_base}) text='{text[:60]}...' ref={reference_audio_path}")
+            wav = model.generate(text, **generate_kwargs)
+
+        ta.save(output_wav, wav, model.sr)
+        if verbose:
+            print(f"[Chatterbox] ✓ Synthesis successful, saved to {output_wav}")
+        return True
+    except Exception as exc:
+        if verbose:
+            print(f"[Chatterbox] TTS exception: {exc}")
+        return False
+
+
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
@@ -302,13 +414,14 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
         print(f"TTS playback failed: {exc}")
 
 
-def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False):
+def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts", voice_model=None, verbose=False, chatterbox_ref_audio_path=None):
     
     global _cached_matched_voice
     global _cached_output_lang 
     
     
     use_piper = voice_backend == "piper"
+    use_chatterbox = voice_backend == "chatterbox"
     piper_voice = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
@@ -317,6 +430,43 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
 
     tts_pcm = None
     try:
+        # --- Chatterbox backend ---
+        if use_chatterbox:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                # Use Turbo for English, Multilingual for everything else
+                use_turbo = lang_base == "en"
+                chatterbox_success = chatterbox_tts(
+                    translated_text,
+                    tts_fp_path,
+                    reference_audio_path=chatterbox_ref_audio_path,
+                    output_lang=lang_base,
+                    use_turbo=use_turbo,
+                    verbose=verbose,
+                )
+                if chatterbox_success:
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Chatterbox synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                if verbose:
+                    print("[TTS] Chatterbox failed, falling back to gTTS")
+                use_chatterbox = False
+            except Exception as cb_exc:
+                if verbose:
+                    print(f"[TTS] Chatterbox synthesis failed: {cb_exc}")
+                use_chatterbox = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
         if use_piper and (piper_voice is None or piper_voice == "en_US-lessac-medium"):
             if (
                 _cached_matched_voice is not None
@@ -481,11 +631,15 @@ def synthesize_tts_pcm_with_cloning(
     reference_sample_rate : int
         Sample rate of reference audio
     voice_backend : str
-        TTS backend to use, either ``"piper"`` or ``"gtts"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"gtts"``, ``"chatterbox"``, or
+        ``"auto"`` (default: ``"gtts"``)
     voice_model : str or None
         Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``)
     voice_match : bool
-        Auto-select Piper voice based on input voice features
+        Auto-select voice based on input voice features.  For the
+        ``"chatterbox"`` backend this passes the reference audio directly to
+        the model as an audio prompt (zero-shot cloning).  For the ``"piper"``
+        backend it selects the best matching Piper voice.
     verbose : bool
         Print debug information
     
@@ -504,6 +658,7 @@ def synthesize_tts_pcm_with_cloning(
   
     
     use_piper = voice_backend == "piper"
+    use_chatterbox = voice_backend == "chatterbox"
     piper_voice = voice_model
 
     if not translated_text:
@@ -512,7 +667,46 @@ def synthesize_tts_pcm_with_cloning(
     try:
         global _cached_matched_voice
         global _cached_output_lang  
-        
+
+        # --- Chatterbox backend ---
+        # When voice_match is enabled, the reference audio is passed directly
+        # as an audio prompt for zero-shot voice cloning.
+        if use_chatterbox:
+            chatterbox_ref_audio_path = None
+            if voice_match and reference_audio is not None:
+                if verbose:
+                    print("==========================================")
+                    print("CHATTERBOX VOICE CLONING (--voice-match)")
+                    print("==========================================")
+                    print("Writing reference audio to temp file for voice cloning...")
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as ref_fp:
+                        chatterbox_ref_audio_path = ref_fp.name
+                    sf.write(chatterbox_ref_audio_path, reference_audio, reference_sample_rate)
+                    if verbose:
+                        print(f"[Chatterbox] Reference audio saved to {chatterbox_ref_audio_path}")
+                except Exception as ref_exc:
+                    if verbose:
+                        print(f"[Chatterbox] Failed to write reference audio: {ref_exc}")
+                    chatterbox_ref_audio_path = None
+            elif voice_match and reference_audio is None:
+                if verbose:
+                    print("⚠ --voice-match requested for chatterbox but no reference audio available")
+
+            try:
+                tts_pcm = synthesize_tts_pcm(
+                    translated_text, rate, output_lang,
+                    voice_backend="chatterbox",
+                    verbose=verbose,
+                    chatterbox_ref_audio_path=chatterbox_ref_audio_path,
+                )
+            finally:
+                if chatterbox_ref_audio_path and os.path.exists(chatterbox_ref_audio_path):
+                    import builtins
+                    if not getattr(builtins, "KEEP_TEMP", False):
+                        os.remove(chatterbox_ref_audio_path)
+            return tts_pcm
+
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
         explicit_voice_provided = bool(piper_voice) and piper_voice != "en_US-lessac-medium"
