@@ -124,9 +124,9 @@ def run_realtime_youtube(
 
     # Deduplication tracking: keep a sliding window of recent outputs to catch duplicates
     # across overlapping chunks.
-    recent_slate_outputs = []
-    recent_scribe_outputs = []
-    dedup_window_size = 10  # Check last 10 outputs
+    recent_slate_outputs = [] if dedup else None
+    recent_scribe_outputs = [] if dedup else None
+    dedup_window_size = 10 if dedup else None  # Check last 10 outputs
     # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
     last_written_scribe = None
     last_written_slate = None
@@ -188,28 +188,40 @@ def run_realtime_youtube(
                     if result:
                         scribe_output = result.get('scribe')
                         slate_output = result.get('slate')
-                        
-                        if scribe_output and scribe_output not in recent_scribe_outputs:
-                            if scribe_file:
+
+                        if dedup:
+                            if scribe_output and scribe_output not in recent_scribe_outputs:
+                                if scribe_file:
+                                    if normalize:
+                                        scribe_output = normalize_text(scribe_output)
+                                    scribe_file.write(f"{scribe_output}\n")
+                                    scribe_file.flush()
+                                recent_scribe_outputs.append(scribe_output)
+                                if len(recent_scribe_outputs) > dedup_window_size:
+                                    recent_scribe_outputs.pop(0)
+                                last_written_scribe = scribe_output
+
+                            if slate_output and slate_output not in recent_slate_outputs:
+                                if slate_file:
+                                    if normalize:
+                                        slate_output = normalize_text(slate_output)
+                                    slate_file.write(f"{slate_output}\n")
+                                    slate_file.flush()
+                                recent_slate_outputs.append(slate_output)
+                                if len(recent_slate_outputs) > dedup_window_size:
+                                    recent_slate_outputs.pop(0)
+                                last_written_slate = slate_output
+                        else:
+                            if scribe_output and scribe_file:
                                 if normalize:
                                     scribe_output = normalize_text(scribe_output)
                                 scribe_file.write(f"{scribe_output}\n")
                                 scribe_file.flush()
-                            recent_scribe_outputs.append(scribe_output)
-                            if len(recent_scribe_outputs) > dedup_window_size:
-                                recent_scribe_outputs.pop(0)
-                            last_written_scribe = scribe_output
-
-                        if slate_output and slate_output not in recent_slate_outputs:
-                            if slate_file:
+                            if slate_output and slate_file:
                                 if normalize:
                                     slate_output = normalize_text(slate_output)
                                 slate_file.write(f"{slate_output}\n")
                                 slate_file.flush()
-                            recent_slate_outputs.append(slate_output)
-                            if len(recent_slate_outputs) > dedup_window_size:
-                                recent_slate_outputs.pop(0)
-                            last_written_slate = slate_output
             except Empty:
                 idle_seconds += 1
                 if not stream_thread.is_alive():
@@ -267,21 +279,33 @@ def run_realtime_youtube(
                 if result:
                     scribe_output = result.get('scribe')
                     slate_output = result.get('slate')
-                    if scribe_output and scribe_output != last_written_scribe:
-                        if scribe_file:
+                    if dedup:
+                        if scribe_output and scribe_output != last_written_scribe:
+                            if scribe_file:
+                                if normalize:
+                                    scribe_output = normalize_text(scribe_output)
+                                scribe_file.write(f"{scribe_output}\n")
+                                scribe_file.flush()
+                            last_written_scribe = scribe_output
+                     
+                        if slate_output and slate_output != last_written_slate:
+                            if slate_file:
+                                if normalize:
+                                    slate_output = normalize_text(slate_output)
+                                slate_file.write(f"{slate_output}\n")
+                                slate_file.flush()
+                            last_written_slate = slate_output
+                    else:
+                        if scribe_output and scribe_file:
                             if normalize:
                                 scribe_output = normalize_text(scribe_output)
                             scribe_file.write(f"{scribe_output}\n")
                             scribe_file.flush()
-                        last_written_scribe = scribe_output
-                 
-                    if slate_output and slate_output != last_written_slate:
-                        if slate_file:
+                        if slate_output and slate_file:
                             if normalize:
                                 slate_output = normalize_text(slate_output)
                             slate_file.write(f"{slate_output}\n")
                             slate_file.flush()
-                        last_written_slate = slate_output
             except Exception as exc:
                 if verbose:
                     print(f"Final buffer processing failed: {exc}")
