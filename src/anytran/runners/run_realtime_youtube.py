@@ -128,8 +128,8 @@ def run_realtime_youtube(
     recent_scribe_outputs = []
     dedup_window_size = 10  # Check last 10 outputs
     # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
-    last_scribe_output = None
-    last_slate_output = None
+    last_written_scribe = None
+    last_written_slate = None
 
     stream_thread = threading.Thread(
         target=stream_youtube_audio,
@@ -198,7 +198,7 @@ def run_realtime_youtube(
                             recent_scribe_outputs.append(scribe_output)
                             if len(recent_scribe_outputs) > dedup_window_size:
                                 recent_scribe_outputs.pop(0)
-                            last_scribe_output = scribe_output
+                            last_written_scribe = scribe_output
 
                         if slate_output and slate_output not in recent_slate_outputs:
                             if slate_file:
@@ -209,7 +209,7 @@ def run_realtime_youtube(
                             recent_slate_outputs.append(slate_output)
                             if len(recent_slate_outputs) > dedup_window_size:
                                 recent_slate_outputs.pop(0)
-                            last_slate_output = slate_output
+                            last_written_slate = slate_output
             except Empty:
                 idle_seconds += 1
                 if not stream_thread.is_alive():
@@ -268,21 +268,21 @@ def run_realtime_youtube(
                     scribe_output = result.get('scribe')
                     slate_output = result.get('slate')
                     
-                    if scribe_output and scribe_output != last_scribe_output:
+                    if scribe_output and scribe_output != last_written_scribe:
                         if scribe_file:
                             if normalize:
                                 scribe_output = normalize_text(scribe_output)
                             scribe_file.write(f"{scribe_output}\n")
                             scribe_file.flush()
-                        last_scribe_output = scribe_output
-                    
-                    if slate_output and slate_output != last_slate_output:
+                        last_written_scribe = scribe_output
+                 
+                    if slate_output and slate_output != last_written_slate:
                         if slate_file:
                             if normalize:
                                 slate_output = normalize_text(slate_output)
                             slate_file.write(f"{slate_output}\n")
                             slate_file.flush()
-                        last_slate_output = slate_output
+                        last_written_slate = slate_output
             except Exception as exc:
                 if verbose:
                     print(f"Final buffer processing failed: {exc}")
