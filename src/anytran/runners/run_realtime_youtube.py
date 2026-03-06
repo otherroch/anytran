@@ -190,27 +190,27 @@ def run_realtime_youtube(
                         slate_output = result.get('slate')
 
                         if dedup:
-                            if scribe_output and scribe_output not in recent_scribe_outputs:
-                                if scribe_file:
-                                    if normalize:
-                                        scribe_output = normalize_text(scribe_output)
-                                    scribe_file.write(f"{scribe_output}\n")
-                                    scribe_file.flush()
-                                recent_scribe_outputs.append(scribe_output)
-                                if len(recent_scribe_outputs) > dedup_window_size:
-                                    recent_scribe_outputs.pop(0)
-                                last_written_scribe = scribe_output
+                            if scribe_output:
+                                scribe_key = normalize_text(scribe_output) if normalize else scribe_output
+                                if scribe_key not in recent_scribe_outputs:
+                                    if scribe_file:
+                                        scribe_file.write(f"{scribe_key}\n")
+                                        scribe_file.flush()
+                                    recent_scribe_outputs.append(scribe_key)
+                                    if len(recent_scribe_outputs) > dedup_window_size:
+                                        recent_scribe_outputs.pop(0)
+                                    last_written_scribe = scribe_key
 
-                            if slate_output and slate_output not in recent_slate_outputs:
-                                if slate_file:
-                                    if normalize:
-                                        slate_output = normalize_text(slate_output)
-                                    slate_file.write(f"{slate_output}\n")
-                                    slate_file.flush()
-                                recent_slate_outputs.append(slate_output)
-                                if len(recent_slate_outputs) > dedup_window_size:
-                                    recent_slate_outputs.pop(0)
-                                last_written_slate = slate_output
+                            if slate_output:
+                                slate_key = normalize_text(slate_output) if normalize else slate_output
+                                if slate_key not in recent_slate_outputs:
+                                    if slate_file:
+                                        slate_file.write(f"{slate_key}\n")
+                                        slate_file.flush()
+                                    recent_slate_outputs.append(slate_key)
+                                    if len(recent_slate_outputs) > dedup_window_size:
+                                        recent_slate_outputs.pop(0)
+                                    last_written_slate = slate_key
                         else:
                             if scribe_output and scribe_file:
                                 if normalize:
@@ -280,21 +280,21 @@ def run_realtime_youtube(
                     scribe_output = result.get('scribe')
                     slate_output = result.get('slate')
                     if dedup:
-                        if scribe_output and scribe_output != last_written_scribe:
-                            if scribe_file:
-                                if normalize:
-                                    scribe_output = normalize_text(scribe_output)
-                                scribe_file.write(f"{scribe_output}\n")
-                                scribe_file.flush()
-                            last_written_scribe = scribe_output
+                        if scribe_output:
+                            scribe_key = normalize_text(scribe_output) if normalize else scribe_output
+                            if scribe_key != last_written_scribe:
+                                if scribe_file:
+                                    scribe_file.write(f"{scribe_key}\n")
+                                    scribe_file.flush()
+                                last_written_scribe = scribe_key
                      
-                        if slate_output and slate_output != last_written_slate:
-                            if slate_file:
-                                if normalize:
-                                    slate_output = normalize_text(slate_output)
-                                slate_file.write(f"{slate_output}\n")
-                                slate_file.flush()
-                            last_written_slate = slate_output
+                        if slate_output:
+                            slate_key = normalize_text(slate_output) if normalize else slate_output
+                            if slate_key != last_written_slate:
+                                if slate_file:
+                                    slate_file.write(f"{slate_key}\n")
+                                    slate_file.flush()
+                                last_written_slate = slate_key
                     else:
                         if scribe_output and scribe_file:
                             if normalize:
