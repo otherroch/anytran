@@ -189,7 +189,7 @@ def run_realtime_youtube(
                         scribe_output = result.get('scribe')
                         slate_output = result.get('slate')
                         
-                        if scribe_output and scribe_output not in recent_scribe_outputs:
+                        if scribe_output and scribe_output not in recent_scribe_outputs and scribe_output != last_scribe_output:
                             if scribe_file:
                                 if normalize:
                                     scribe_output = normalize_text(scribe_output)
@@ -200,7 +200,7 @@ def run_realtime_youtube(
                                 recent_scribe_outputs.pop(0)
                             last_scribe_output = scribe_output
 
-                        if slate_output and slate_output not in recent_slate_outputs:
+                        if slate_output and slate_output not in recent_slate_outputs and slate_output != last_slate_output:
                             if slate_file:
                                 if normalize:
                                     slate_output = normalize_text(slate_output)
