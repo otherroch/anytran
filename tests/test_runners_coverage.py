@@ -112,7 +112,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
         if slate_segments is not None:
             slate_segments.append(np.array([2.0, 2.0], dtype=np.float32))
         idx = len(process_calls)
-        # Return the same slate output to ensure deduplication skips the second write.
+        # Return the same slate output so deduplication keeps only the first write.
         return {"scribe": f"scribe-{idx}", "slate": "SLATE-UNCHANGED"}
 
     output_calls = []
@@ -164,7 +164,10 @@ def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modu
     output_calls = []
     monkeypatch.setattr(rro, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
 
+    process_calls = []
+
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        process_calls.append(np.array(audio_segment))
         scribe_segments = kwargs["scribe_tts_segments"]
         slate_segments = kwargs["slate_tts_segments"]
         if scribe_segments is not None:
@@ -200,6 +203,7 @@ def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modu
     assert mqtt_calls  # init_mqtt was invoked
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == ["LINE"]
     assert slate_text_file.read_text(encoding="utf-8").splitlines() == ["LINE"]
+    assert len(process_calls) == 2  # two chunks processed but dedup wrote once
     assert output_calls[0][0] == str(scribe_audio_path)
     np.testing.assert_allclose(output_calls[0][1], np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32))
     assert output_calls[1][0] == str(slate_audio_path)
