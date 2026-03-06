@@ -13,6 +13,10 @@ from queue import Queue, Empty
 
 from anytran.audio_io import output_audio
 
+DRAIN_COMPLETE_MSG = "Stop requested; audio queue drain complete."
+QUEUE_TIMEOUT_DRAIN = 0
+QUEUE_TIMEOUT_NORMAL = 1
+
 def run_realtime_youtube(
     youtube_url,
     youtube_api_key,
@@ -130,6 +134,13 @@ def run_realtime_youtube(
     # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
     last_written_scribe = None
     last_written_slate = None
+    drain_logged = False
+
+    def log_drain_complete():
+        nonlocal drain_logged
+        if not drain_logged:
+            print(DRAIN_COMPLETE_MSG)
+            drain_logged = True
 
     stream_thread = threading.Thread(
         target=stream_youtube_audio,
@@ -145,9 +156,11 @@ def run_realtime_youtube(
     stream_ended = False
 
     try:
-        while not stop_flag.is_set():
+        # Drain audio after stop is requested until the queue is empty (handled via Empty), or until idle timeout after the stream ends.
+        while True:
             try:
-                audio_chunk = audio_queue.get(timeout=1)
+                queue_timeout = QUEUE_TIMEOUT_DRAIN if stop_flag.is_set() else QUEUE_TIMEOUT_NORMAL
+                audio_chunk = audio_queue.get(timeout=queue_timeout)
                 idle_seconds = 0
                 buffer = np.concatenate([buffer, audio_chunk])
                 if len(buffer) >= chunk:
@@ -223,6 +236,9 @@ def run_realtime_youtube(
                                 slate_file.write(f"{slate_output}\n")
                                 slate_file.flush()
             except Empty:
+                if stop_flag.is_set():
+                    log_drain_complete()
+                    break
                 idle_seconds += 1
                 if not stream_thread.is_alive():
                     stream_ended = True
@@ -233,8 +249,6 @@ def run_realtime_youtube(
                 if not stream_ended and idle_seconds >= max_idle_seconds:
                     print("No audio received from YouTube stream; waiting for reconnect.")
                     idle_seconds = 0
-                if stop_flag.is_set():
-                    break
                 continue
     except KeyboardInterrupt:
         print("\nStopped.", flush=True)
