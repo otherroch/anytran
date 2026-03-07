@@ -47,9 +47,9 @@ def reset_whisper_config():
     whisper_backend._whisper_ctranslate2_device = None
 
 
-@mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
-@mock.patch('anytran.processing.translate_text')
-@mock.patch('anytran.processing.translate_audio')
+@mock.patch(f'{__name__}.processing.synthesize_tts_pcm_with_cloning')
+@mock.patch(f'{__name__}.processing.translate_text')
+@mock.patch(f'{__name__}.processing.translate_audio')
 def test_cross_language_voice_cloning_translates_ref_text(mock_translate_audio, mock_translate_text, mock_synthesize):
     """Test that cross-language voice cloning translates reference_text to target language."""
     
@@ -162,9 +162,9 @@ def test_cross_language_voice_cloning_translates_ref_text(mock_translate_audio, 
     assert ref_text_translation['target_lang'] == 'fr', \
         f"ref_text translation target should be 'fr', got: {ref_text_translation['target_lang']}"
 
-@mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
-@mock.patch('anytran.processing.translate_text')
-@mock.patch('anytran.processing.translate_audio')
+@mock.patch(f'{__name__}.processing.synthesize_tts_pcm_with_cloning')
+@mock.patch(f'{__name__}.processing.translate_text')
+@mock.patch(f'{__name__}.processing.translate_audio')
 def test_same_language_voice_cloning_with_ref_text(mock_translate_audio, mock_translate_text, mock_synthesize):
     """Test that same-language voice cloning DOES pass reference_text."""
     
