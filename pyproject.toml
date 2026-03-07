@@ -30,6 +30,7 @@ web = ["fastapi", "uvicorn[standard]"]
 youtube = ["yt-dlp"]
 vad = ["silero-vad"]
 piper = ["piper-tts"]
+custom = ["qwen-tts", "torch", "transformers"]
 # For CUDA support: install pywhispercpp separately FIRST with editable flag
 # GGML_CUDA=1 pip install -e git+https://github.com/absadiki/pywhispercpp#egg=pywhispercpp
 # Then: pip install -e .[whispercpp]

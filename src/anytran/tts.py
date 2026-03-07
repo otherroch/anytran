@@ -8,6 +8,21 @@ try:
 except ImportError:
     PiperVoice = None
     PIPER_PYTHON_AVAILABLE = False
+
+try:
+    from qwen_tts import Qwen3TTSModel
+    QWEN_TTS_AVAILABLE = True
+except ImportError:
+    Qwen3TTSModel = None
+    QWEN_TTS_AVAILABLE = False
+
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
+
 import tempfile
 
 import librosa
@@ -40,12 +55,15 @@ from .voice_matcher import (
 #   should be considered invalid and recomputed.
 # - _piper_voice_cache: a mapping from model identifiers (e.g., file paths) to
 #   PiperVoice instances, so that models are loaded only once per process.
+# - _custom_model_cache: a mapping from model names to Qwen3TTSModel instances,
+#   so that models are loaded only once per process.
 # These caches are initialized at import time and are updated by helper functions
 # in this module; they are internal implementation details and should not be
 # modified directly by callers.
 _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
+_custom_model_cache = {}
 
 
 def _find_piper_config_path(model_path):
@@ -235,6 +253,167 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
         return False
 
 
+def _map_to_qwen_language(lang_code):
+    """
+    Map language code to Qwen3-TTS language name.
+    
+    Qwen3-TTS supports: Chinese, English, Japanese, Korean, German, French, 
+    Russian, Portuguese, Spanish, Italian
+    """
+    if not lang_code:
+        return "Auto"
+    
+    lang_base = lang_code.split("-")[0].split("_")[0].lower()
+    
+    language_map = {
+        "en": "English",
+        "zh": "Chinese",
+        "ja": "Japanese",
+        "ko": "Korean",
+        "de": "German",
+        "fr": "French",
+        "ru": "Russian",
+        "pt": "Portuguese",
+        "es": "Spanish",
+        "it": "Italian",
+    }
+    
+    return language_map.get(lang_base, "Auto")
+
+
+def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None, reference_text=None, verbose=False):
+    """
+    Synthesize text to audio using Qwen3-TTS (CustomVoice or Base models).
+    
+    Parameters
+    ----------
+    text : str
+        Text to synthesize
+    voice_model : str
+        Model name or path (e.g., "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" or
+        "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+    output_lang : str
+        Output language code (e.g., "en", "zh-CN")
+    output_wav : str
+        Path to output WAV file
+    reference_audio : np.ndarray or None
+        Reference audio for voice cloning (only used with Base model)
+    reference_text : str or None
+        Transcript of reference audio (improves cloning quality)
+    verbose : bool
+        Print debug information
+    
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    global _custom_model_cache
+    
+    try:
+        if not QWEN_TTS_AVAILABLE:
+            print("[CustomTTS][ERROR] qwen-tts is not installed. Please install with: pip install qwen-tts")
+            return False
+        
+        # Default to CustomVoice model if not specified or if a Piper model is specified
+        if not voice_model or (voice_model and "Qwen" not in voice_model):
+            if verbose and voice_model:
+                print(f"[CustomTTS] Replacing non-Qwen model '{voice_model}' with default CustomVoice model")
+            voice_model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+        
+        # Determine if this is a Base model (for voice cloning) or CustomVoice model
+        is_base_model = "Base" in voice_model
+        
+        # Load model from cache or create new instance
+        if voice_model in _custom_model_cache:
+            if verbose:
+                print(f"[CustomTTS] Reusing cached model: {voice_model}")
+            model = _custom_model_cache[voice_model]
+        else:
+            if verbose:
+                print(f"[CustomTTS] Loading model: {voice_model}")
+            try:
+                if not TORCH_AVAILABLE:
+                    print("[CustomTTS][ERROR] torch is not installed. Please install with: pip install torch")
+                    return False
+                
+                model = Qwen3TTSModel.from_pretrained(
+                    voice_model,
+                    device_map="auto",
+                    dtype=torch.bfloat16,
+                )
+                _custom_model_cache[voice_model] = model
+                if verbose:
+                    print(f"[CustomTTS] Model loaded successfully")
+            except Exception as load_exc:
+                print(f"[CustomTTS][ERROR] Failed to load model: {load_exc}")
+                return False
+        
+        # Map language code to Qwen3 language name
+        language = _map_to_qwen_language(output_lang)
+        if verbose:
+            print(f"[CustomTTS] Language mapping: {output_lang} -> {language}")
+        
+        # Generate speech
+        try:
+            if is_base_model and reference_audio is not None:
+                # Voice cloning mode
+                if verbose:
+                    print(f"[CustomTTS] Using voice cloning with reference audio")
+                
+                # Convert reference audio to proper format (numpy array with sample rate)
+                # reference_audio is already a numpy array from anytran
+                ref_audio_tuple = (reference_audio, 16000)  # anytran uses 16kHz
+                
+                wavs, sr = model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    ref_audio=ref_audio_tuple,
+                    ref_text=reference_text if reference_text else None,
+                )
+            else:
+                # CustomVoice mode - use default speaker
+                if verbose:
+                    print(f"[CustomTTS] Using CustomVoice synthesis")
+                
+                # Get supported speakers and use first one as default
+                try:
+                    speakers = model.get_supported_speakers()
+                    default_speaker = speakers[0] if speakers else "Ryan"
+                    if verbose:
+                        print(f"[CustomTTS] Available speakers: {speakers}")
+                        print(f"[CustomTTS] Using default speaker: {default_speaker}")
+                except Exception:
+                    # Fallback if get_supported_speakers is not available
+                    default_speaker = "Ryan"
+                    if verbose:
+                        print(f"[CustomTTS] Using fallback speaker: {default_speaker}")
+                
+                wavs, sr = model.generate_custom_voice(
+                    text=text,
+                    language=language,
+                    speaker=default_speaker,
+                )
+            
+            # Save to WAV file
+            import soundfile as sf
+            sf.write(output_wav, wavs[0], sr)
+            
+            if verbose:
+                print(f"[CustomTTS] ✓ Synthesis successful, saved to {output_wav}")
+            return True
+            
+        except Exception as gen_exc:
+            print(f"[CustomTTS][ERROR] Generation failed: {gen_exc}")
+            return False
+    
+    except Exception as exc:
+        if verbose:
+            print(f"[CustomTTS] TTS exception: {exc}")
+        return False
+
+
+
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
@@ -309,7 +488,9 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     
     
     use_piper = voice_backend == "piper"
+    use_custom = voice_backend == "custom"
     piper_voice = voice_model
+    custom_model = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
     if not translated_text:
@@ -317,6 +498,61 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
 
     tts_pcm = None
     try:
+        # Custom TTS backend (Qwen3-TTS)
+        if use_custom:
+            if verbose:
+                print(f"[TTS] Using Custom (Qwen3-TTS) backend")
+            
+            # Default to CustomVoice model if not specified or if a Piper model is specified
+            # (e.g., when using default --voice-model en_US-lessac-medium with --voice-backend custom)
+            if not custom_model or (custom_model and "Qwen" not in custom_model):
+                if verbose and custom_model:
+                    print(f"[TTS] Replacing non-Qwen model '{custom_model}' with default CustomVoice model")
+                custom_model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                custom_success = custom_tts(
+                    translated_text, 
+                    custom_model, 
+                    output_lang,
+                    tts_fp_path, 
+                    verbose=verbose
+                )
+                if custom_success:
+                    if verbose:
+                        print(f"[TTS] Custom result: SUCCESS (model={custom_model})")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if not audio_data.size:
+                        if verbose:
+                            print(f"[TTS] Custom result: no data")
+                        use_custom = False
+                    else:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                            if not audio_data.size:
+                                if verbose:
+                                    print(f"[TTS] librosa resample result: no data")
+                                use_custom = False
+                        if use_custom and audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose: 
+                                print(f"[TTS] Custom synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                else:
+                    if verbose:
+                        print(f"[TTS] Custom TTS failed, falling back to gTTS")
+                    use_custom = False
+            except Exception as custom_exc:
+                if verbose:
+                    print(f"[TTS] Custom synthesis failed: {custom_exc}")
+                use_custom = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+        
         if use_piper and (piper_voice is None or piper_voice == "en_US-lessac-medium"):
             if (
                 _cached_matched_voice is not None
@@ -403,7 +639,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper:
+        if not use_piper and not use_custom:
             if not _ensure_gtts_available(verbose=verbose):
                 return None
             tts_lang = lang_base
@@ -460,6 +696,7 @@ def synthesize_tts_pcm_with_cloning(
         output_lang,
         reference_audio=None,
         reference_sample_rate=16000,
+        reference_text=None,
         voice_backend="gtts",
         voice_model=None,
         voice_match=False,
@@ -480,12 +717,16 @@ def synthesize_tts_pcm_with_cloning(
         Reference audio for voice matching
     reference_sample_rate : int
         Sample rate of reference audio
+    reference_text : str or None
+        Transcript of reference audio (improves voice cloning quality for custom backend)
     voice_backend : str
-        TTS backend to use, either ``"piper"`` or ``"gtts"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"gtts"``, or ``"custom"`` (default: ``"gtts"``)
     voice_model : str or None
-        Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``)
+        Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``,
+        or as the Qwen3-TTS model when ``voice_backend`` is ``"custom"``)
     voice_match : bool
-        Auto-select Piper voice based on input voice features
+        Auto-select Piper voice based on input voice features (for piper backend),
+        or use voice cloning with reference audio (for custom backend)
     verbose : bool
         Print debug information
     
@@ -500,18 +741,96 @@ def synthesize_tts_pcm_with_cloning(
     only once per process lifetime when reference audio is provided. The
     matched voice is stored in a module-level cache and reused for later
     calls to avoid repeated analysis.
+    
+    For custom backend with voice_match, the Base model is used with reference
+    audio for voice cloning.
     """ 
   
     
     use_piper = voice_backend == "piper"
+    use_custom = voice_backend == "custom"
     piper_voice = voice_model
+    custom_model = voice_model
 
     if not translated_text:
         return None
     
     try:
         global _cached_matched_voice
-        global _cached_output_lang  
+        global _cached_output_lang
+        
+        # Custom backend with voice matching uses Base model for voice cloning
+        if use_custom and voice_match and reference_audio is not None:
+            if verbose:
+                print("==========================================")
+                print("CUSTOM VOICE CLONING (--voice-match)")
+                print("==========================================")
+                print(f"Using reference audio for voice cloning with Qwen3-TTS Base model")
+            
+            # Default to Base model for voice cloning
+            # Also replace Piper models (e.g., en_US-lessac-medium) with Qwen3-TTS Base
+            if not custom_model or (custom_model and "Qwen" not in custom_model):
+                if verbose and custom_model:
+                    print(f"[TTS] Replacing non-Qwen model '{custom_model}' with default Base model")
+                custom_model = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+            elif "CustomVoice" in custom_model:
+                # If CustomVoice was specified, switch to Base for cloning
+                custom_model = custom_model.replace("CustomVoice", "Base")
+                if verbose:
+                    print(f"Switching to Base model for voice cloning: {custom_model}")
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                # Resample reference audio to 16kHz if needed
+                ref_audio = reference_audio
+                if reference_sample_rate != 16000:
+                    ref_audio = librosa.resample(
+                        reference_audio.astype(np.float32) / 32768.0,
+                        orig_sr=reference_sample_rate,
+                        target_sr=16000
+                    )
+                else:
+                    ref_audio = reference_audio.astype(np.float32) / 32768.0
+                
+                custom_success = custom_tts(
+                    translated_text,
+                    custom_model,
+                    output_lang,
+                    tts_fp_path,
+                    reference_audio=ref_audio,
+                    reference_text=reference_text,
+                    verbose=verbose
+                )
+                
+                if custom_success:
+                    if verbose:
+                        print(f"[TTS] Custom voice cloning result: SUCCESS")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Custom voice cloning complete: {len(tts_pcm)} samples")
+                                print("==========================================")
+                            return tts_pcm
+                
+                if verbose:
+                    print(f"[TTS] Custom voice cloning failed, falling back to standard synthesis")
+                    print("==========================================")
+                use_custom = False
+                
+            except Exception as custom_exc:
+                if verbose:
+                    print(f"[TTS] Custom voice cloning failed: {custom_exc}")
+                    print("==========================================")
+                use_custom = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
         
         # Only apply if user didn't explicitly specify a non-default voice
         # Default voice is "en_US-lessac-medium"
@@ -594,11 +913,21 @@ def synthesize_tts_pcm_with_cloning(
                         print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
                     piper_voice = lang_voice
 
-        # Standard Piper TTS or gTTS
+        # Standard TTS synthesis (Piper, Custom, or gTTS)
+        if use_custom:
+            backend = "custom"
+            model = custom_model if custom_model else "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+        elif use_piper:
+            backend = "piper"
+            model = piper_voice
+        else:
+            backend = "gtts"
+            model = None
+        
         tts_pcm = synthesize_tts_pcm(
             translated_text, rate, output_lang,
-            voice_backend="piper" if use_piper else "gtts",
-            voice_model=piper_voice,
+            voice_backend=backend,
+            voice_model=model,
             verbose=verbose,
         )
         return tts_pcm
