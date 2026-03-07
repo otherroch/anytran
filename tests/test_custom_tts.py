@@ -233,8 +233,11 @@ def test_synthesize_tts_pcm_with_cloning_custom_backend(monkeypatch):
         class bfloat16:
             pass
     
+    ref_text_received = []
+    
     class FakeQwen3Model:
         def generate_voice_clone(self, text, language, ref_audio, ref_text=None):
+            ref_text_received.append(ref_text)
             sample_rate = 24000
             audio = np.zeros(sample_rate, dtype=np.float32)
             return [audio], sample_rate
@@ -252,12 +255,14 @@ def test_synthesize_tts_pcm_with_cloning_custom_backend(monkeypatch):
     # Create reference audio (properly scaled int16 audio)
     ref_audio = (np.clip(np.random.randn(16000), -1.0, 1.0) * 32767).astype(np.int16)
     
+    # Test with reference_text
     result = tts.synthesize_tts_pcm_with_cloning(
         "Hello world",
         rate=16000,
         output_lang="en",
         reference_audio=ref_audio,
         reference_sample_rate=16000,
+        reference_text="This is the reference text",
         voice_backend="custom",
         voice_model="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         voice_match=True,
@@ -267,6 +272,8 @@ def test_synthesize_tts_pcm_with_cloning_custom_backend(monkeypatch):
     assert result is not None
     assert isinstance(result, np.ndarray)
     assert result.dtype == np.int16
+    assert len(ref_text_received) == 1
+    assert ref_text_received[0] == "This is the reference text"
 
 
 def test_custom_backend_replaces_piper_model(monkeypatch):

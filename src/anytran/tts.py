@@ -696,6 +696,7 @@ def synthesize_tts_pcm_with_cloning(
         output_lang,
         reference_audio=None,
         reference_sample_rate=16000,
+        reference_text=None,
         voice_backend="gtts",
         voice_model=None,
         voice_match=False,
@@ -716,6 +717,8 @@ def synthesize_tts_pcm_with_cloning(
         Reference audio for voice matching
     reference_sample_rate : int
         Sample rate of reference audio
+    reference_text : str or None
+        Transcript of reference audio (improves voice cloning quality for custom backend)
     voice_backend : str
         TTS backend to use: ``"piper"``, ``"gtts"``, or ``"custom"`` (default: ``"gtts"``)
     voice_model : str or None
@@ -796,7 +799,7 @@ def synthesize_tts_pcm_with_cloning(
                     output_lang,
                     tts_fp_path,
                     reference_audio=ref_audio,
-                    reference_text=None,  # We don't have transcript of reference audio
+                    reference_text=reference_text,
                     verbose=verbose
                 )
                 
