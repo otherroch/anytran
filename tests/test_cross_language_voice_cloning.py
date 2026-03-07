@@ -1,9 +1,9 @@
 """
-Test to verify cross-language voice cloning uses correct language.
+Test to verify cross-language voice cloning translates reference_text.
 
 This test validates that when synthesizing slate audio with voice cloning
-for a different language than the input, the model uses the correct target language
-and doesn't pass reference_text which could confuse the model.
+for a different language than the input, the reference_text is translated
+to match the target language (required for Qwen3-TTS ICL mode).
 """
 
 import pytest
@@ -16,10 +16,11 @@ from anytran import processing
 @mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
 @mock.patch('anytran.processing.translate_text')
 @mock.patch('anytran.processing.translate_audio')
-def test_cross_language_voice_cloning_no_ref_text(mock_translate_audio, mock_translate_text, mock_synthesize):
-    """Test that cross-language voice cloning doesn't pass reference_text."""
+def test_cross_language_voice_cloning_translates_ref_text(mock_translate_audio, mock_translate_text, mock_synthesize):
+    """Test that cross-language voice cloning translates reference_text to target language."""
     
     captured_calls = []
+    translate_text_calls = []
     
     def capture_synthesize(text, rate, output_lang, **kwargs):
         captured_calls.append({
@@ -31,9 +32,22 @@ def test_cross_language_voice_cloning_no_ref_text(mock_translate_audio, mock_tra
         })
         return np.zeros(1000, dtype=np.int16)
     
+    def capture_translate_text(text, source_lang, target_lang, **kwargs):
+        translate_text_calls.append({
+            'text': text,
+            'source_lang': source_lang,
+            'target_lang': target_lang,
+        })
+        # First call is for stage2 translation (english_text → translated_text)
+        # Second call is for ref_text translation (english_text → ref_text in target lang)
+        if len(translate_text_calls) == 1:
+            return "Bonjour le monde"  # Stage 2 translation
+        else:
+            return "Bonjour le monde"  # ref_text translation (same as stage 2 in this case)
+    
     mock_synthesize.side_effect = capture_synthesize
     mock_translate_audio.return_value = (np.zeros(16000, dtype=np.int16), "Hello world", "en")
-    mock_translate_text.return_value = "Bonjour le monde"
+    mock_translate_text.side_effect = capture_translate_text
     
     audio_segment = (np.random.randn(16000) * 1000).astype(np.int16)
     slate_tts_segments = []
@@ -93,10 +107,26 @@ def test_cross_language_voice_cloning_no_ref_text(mock_translate_audio, mock_tra
     assert slate_call['reference_audio'] is True, "Reference audio should be provided for voice cloning"
     assert slate_call['voice_match'] is True, "Voice match should be enabled"
     
-    # CRITICAL: reference_text should be None for cross-language synthesis
-    assert slate_call['reference_text'] is None, \
-        f"reference_text should be None for cross-language synthesis, but got: {slate_call['reference_text']}"
-
+    # CRITICAL: reference_text should be TRANSLATED to French (not None, not English)
+    assert slate_call['reference_text'] is not None, \
+        "reference_text should not be None (required for Qwen3-TTS ICL mode)"
+    assert slate_call['reference_text'] == "Bonjour le monde", \
+        f"reference_text should be translated to French, but got: {slate_call['reference_text']}"
+    
+    # Verify that translate_text was called twice:
+    # 1. For stage2 translation (english_text → translated_text)
+    # 2. For ref_text translation (english_text → ref_text in target language)
+    assert len(translate_text_calls) == 2, \
+        f"Expected 2 translate_text calls, got {len(translate_text_calls)}: {translate_text_calls}"
+    
+    # Second call should be for ref_text translation
+    ref_text_translation = translate_text_calls[1]
+    assert ref_text_translation['text'] == "Hello world", \
+        f"ref_text translation should use english_text, got: {ref_text_translation['text']}"
+    assert ref_text_translation['source_lang'] == 'en', \
+        f"ref_text translation source should be 'en', got: {ref_text_translation['source_lang']}"
+    assert ref_text_translation['target_lang'] == 'fr', \
+        f"ref_text translation target should be 'fr', got: {ref_text_translation['target_lang']}"
 
 @mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
 @mock.patch('anytran.processing.translate_text')
