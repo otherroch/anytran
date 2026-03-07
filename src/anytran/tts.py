@@ -416,7 +416,6 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
                 )
             
             # Save to WAV file
-            import soundfile as sf
             sf.write(output_wav, wavs[0], sr)
             
             if verbose:
