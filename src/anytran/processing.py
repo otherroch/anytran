@@ -456,13 +456,13 @@ def process_audio_chunk(
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}NOTE: LangSwap changed translation target but Stage 2 was skipped (target is English)")
             print(f"{prefix}  - This means the original target was English, so no text translation occurred")
-            print(f"{prefix}  - However, we will still synthesize TTS for the final text language (which may be non-English)")      
+            print(f"{prefix}  - However, we will still synthesize TTS for the final text language")      
         
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             english_text,
             rate,
-            "en",
+            tts_lang,
             reference_audio=audio_segment if voice_match else None,
             reference_sample_rate=rate,
             reference_text=english_text if voice_match else None,
@@ -474,12 +474,12 @@ def process_audio_chunk(
         add_timing(timings, "stage3_tts_synthesis", t0)
         if verbose:
             prefix = f"[Stream {stream_id}] " if stream_id else ""
-            print(f"{prefix}Stage 3 (TTS - Slate/English): Generated voice audio")
+            print(f"{prefix}Stage 3 (TTS - Slate/{tts_lang}): Generated voice audio")
             if slate_tts_pcm is not None:
                 print(f"{prefix}  - Slate TTS PCM length: {len(slate_tts_pcm)} samples")
                 
     # Synthesize scribe audio (English)
-    if not stage2_ran and english_text and scribe_tts_segments is not None:
+    if english_text and scribe_tts_segments is not None:
 
         t0 = time.perf_counter()
         scribe_tts_pcm = synthesize_tts_pcm_with_cloning(
