@@ -8,6 +8,15 @@ try:
 except ImportError:
     PiperVoice = None
     PIPER_PYTHON_AVAILABLE = False
+
+# CosyVoice import detection
+try:
+    from cosyvoice.cli.cosyvoice import CosyVoice
+    COSYVOICE_AVAILABLE = True
+except ImportError:
+    CosyVoice = None
+    COSYVOICE_AVAILABLE = False
+
 import tempfile
 
 import librosa
@@ -40,12 +49,15 @@ from .voice_matcher import (
 #   should be considered invalid and recomputed.
 # - _piper_voice_cache: a mapping from model identifiers (e.g., file paths) to
 #   PiperVoice instances, so that models are loaded only once per process.
+# - _cosyvoice_model_cache: a mapping from model identifiers to CosyVoice instances,
+#   so that CosyVoice models are loaded only once per process.
 # These caches are initialized at import time and are updated by helper functions
 # in this module; they are internal implementation details and should not be
 # modified directly by callers.
 _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
+_cosyvoice_model_cache = {}
 
 
 def _find_piper_config_path(model_path):
@@ -235,16 +247,172 @@ def piper_tts(text, voice_model, output_wav, verbose=False):
         return False
 
 
+def _ensure_cosyvoice_available(verbose=True):
+    """Check if CosyVoice is available."""
+    if not COSYVOICE_AVAILABLE:
+        if verbose:
+            print("[CosyVoice][ERROR] CosyVoice is not installed. Install with: pip install -e .[cosyvoice]")
+        return False
+    return True
+
+
+def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbose=False):
+    """
+    Generate speech using CosyVoice TTS.
+    
+    Parameters
+    ----------
+    text : str
+        Text to synthesize
+    model_name : str
+        Model name or path (e.g., "FunAudioLLM/Fun-CosyVoice3-0.5B-2512")
+    output_wav : str
+        Output WAV file path
+    reference_audio_path : str or None
+        Path to reference audio for voice cloning
+    verbose : bool
+        Print debug information
+        
+    Returns
+    -------
+    bool
+        True if synthesis succeeded, False otherwise
+    """
+    global _cosyvoice_model_cache
+    
+    if not _ensure_cosyvoice_available(verbose=verbose):
+        return False
+    
+    try:
+        # Default model if none specified
+        if not model_name or model_name == "en_US-lessac-medium":
+            model_name = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+            
+        if verbose:
+            print(f"[CosyVoice] Using model: {model_name}")
+        
+        # Check cache for model
+        model = _cosyvoice_model_cache.get(model_name)
+        if model is None:
+            if verbose:
+                print(f"[CosyVoice] Loading model: {model_name}")
+            
+            # Try to load from local path first, then from HuggingFace
+            if os.path.isdir(model_name):
+                model = CosyVoice(model_name)
+            else:
+                # Load from HuggingFace or ModelScope
+                try:
+                    from modelscope import snapshot_download
+                    local_dir = os.path.join("pretrained_models", model_name.split("/")[-1])
+                    if not os.path.isdir(local_dir):
+                        if verbose:
+                            print(f"[CosyVoice] Downloading model to {local_dir}")
+                        snapshot_download(model_name, local_dir=local_dir)
+                    model = CosyVoice(local_dir)
+                except ImportError:
+                    # Fall back to loading directly if modelscope not available
+                    if verbose:
+                        print(f"[CosyVoice] ModelScope not available, trying direct load")
+                    model = CosyVoice(model_name)
+                    
+            _cosyvoice_model_cache[model_name] = model
+            if verbose:
+                print(f"[CosyVoice] Model loaded successfully")
+        else:
+            if verbose:
+                print(f"[CosyVoice] Reusing cached model")
+        
+        # Synthesize audio
+        if verbose:
+            print(f"[CosyVoice] Synthesizing text: '{text[:50]}...'")
+        
+        # If reference audio is provided, use it for voice cloning
+        if reference_audio_path and os.path.isfile(reference_audio_path):
+            if verbose:
+                print(f"[CosyVoice] Using reference audio: {reference_audio_path}")
+            # CosyVoice inference with reference audio (zero-shot cloning)
+            output = model.inference_zero_shot(text, reference_audio_path)
+        else:
+            # Standard TTS inference
+            if verbose:
+                print(f"[CosyVoice] Using standard TTS (no reference audio)")
+            output = model.inference_sft(text)
+        
+        # Save to WAV file
+        # CosyVoice output is typically a tensor or numpy array
+        if hasattr(output, 'cpu'):
+            # Convert torch tensor to numpy
+            audio_data = output.cpu().numpy()
+        else:
+            audio_data = np.array(output)
+        
+        # Ensure audio is in correct shape (flatten if needed)
+        if len(audio_data.shape) > 1:
+            audio_data = audio_data.flatten()
+        
+        # CosyVoice typically outputs at 22050 Hz
+        sample_rate = 22050
+        
+        # Save as WAV
+        sf.write(output_wav, audio_data, sample_rate)
+        
+        if verbose:
+            print(f"[CosyVoice] ✓ Synthesis successful, saved to {output_wav}")
+        return True
+        
+    except Exception as exc:
+        if verbose:
+            print(f"[CosyVoice][ERROR] TTS synthesis failed: {exc}")
+            import traceback
+            traceback.print_exc()
+        return False
+
+
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
+    use_cosyvoice = voice_backend == "cosyvoice"
     piper_voice = voice_model
+    cosyvoice_model = voice_model
 
     # print(f"[TRACE] play_output called with use_piper={use_piper}, piper_voice={piper_voice}, lang={lang}, play_audio={play_audio}, wav_file={wav_file}, rate={rate}")
     if not translated_text:
         return
 
     try:
-        if use_piper and piper_voice:
+        if use_cosyvoice:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+
+            try:
+                if cosyvoice_tts(translated_text, cosyvoice_model, tts_fp_path, verbose=False):
+                    if play_audio:
+                        if sys.platform == "win32":
+                            subprocess.Popen(
+                                ["ffplay", "-nodisp", "-autoexit", tts_fp_path],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                            )
+                        else:
+                            subprocess.Popen(
+                                ["ffplay", "-nodisp", "-autoexit", tts_fp_path],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL
+                            )
+                    if wav_file:
+                        audio_data, sr = sf.read(tts_fp_path)
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        wav_file.writeframes((audio_data * 32768).astype(np.int16).tobytes())
+                else:
+                    use_cosyvoice = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
+        if use_piper and piper_voice and not use_cosyvoice:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
                 tts_fp_path = tts_fp.name
 
@@ -276,7 +444,7 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper:
+        if not use_piper and not use_cosyvoice:
             if not _ensure_gtts_available():
                 return
             tts_lang = lang.split("-")[0]
@@ -309,7 +477,9 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     
     
     use_piper = voice_backend == "piper"
+    use_cosyvoice = voice_backend == "cosyvoice"
     piper_voice = voice_model
+    cosyvoice_model = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
     if not translated_text:
@@ -317,6 +487,48 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
 
     tts_pcm = None
     try:
+        # CosyVoice backend
+        if use_cosyvoice:
+            if verbose:
+                print(f"[TTS] Using CosyVoice backend")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                cosyvoice_success = cosyvoice_tts(translated_text, cosyvoice_model, tts_fp_path, verbose=verbose)
+                if cosyvoice_success:
+                    if verbose:
+                        print(f"[TTS] CosyVoice result: SUCCESS")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if not audio_data.size:
+                        if verbose:
+                            print(f"[TTS] CosyVoice result: no data")
+                        use_cosyvoice = False
+                    else:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                            if not audio_data.size:
+                                if verbose:
+                                    print(f"[TTS] librosa resample result: no data")
+                                use_cosyvoice = False
+                        if use_cosyvoice and audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] CosyVoice synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                else:
+                    if verbose:
+                        print(f"[TTS] CosyVoice failed, falling back to gTTS")
+                    use_cosyvoice = False
+            except Exception as cosyvoice_exc:
+                if verbose:
+                    print(f"[TTS] CosyVoice synthesis failed: {cosyvoice_exc}")
+                use_cosyvoice = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+        
+        # Piper backend
         if use_piper and (piper_voice is None or piper_voice == "en_US-lessac-medium"):
             if (
                 _cached_matched_voice is not None
@@ -403,7 +615,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper:
+        if not use_piper and not use_cosyvoice:
             if not _ensure_gtts_available(verbose=verbose):
                 return None
             tts_lang = lang_base
@@ -481,11 +693,13 @@ def synthesize_tts_pcm_with_cloning(
     reference_sample_rate : int
         Sample rate of reference audio
     voice_backend : str
-        TTS backend to use, either ``"piper"`` or ``"gtts"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"cosyvoice"``, or ``"gtts"`` (default: ``"gtts"``)
     voice_model : str or None
-        Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``)
+        Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``,
+        or as the CosyVoice model when ``voice_backend`` is ``"cosyvoice"``)
     voice_match : bool
-        Auto-select Piper voice based on input voice features
+        Auto-select Piper voice based on input voice features, or use reference audio
+        for CosyVoice zero-shot cloning
     verbose : bool
         Print debug information
     
@@ -496,20 +710,78 @@ def synthesize_tts_pcm_with_cloning(
     
     Notes
     -----
-    When ``voice_match`` is enabled, this function performs voice matching
-    only once per process lifetime when reference audio is provided. The
-    matched voice is stored in a module-level cache and reused for later
-    calls to avoid repeated analysis.
+    When ``voice_match`` is enabled:
+    - For Piper: performs voice matching only once per process lifetime when reference 
+      audio is provided. The matched voice is stored in a module-level cache and reused 
+      for later calls to avoid repeated analysis.
+    - For CosyVoice: uses reference audio directly for zero-shot voice cloning.
     """ 
   
     
     use_piper = voice_backend == "piper"
+    use_cosyvoice = voice_backend == "cosyvoice"
     piper_voice = voice_model
+    cosyvoice_model = voice_model
 
     if not translated_text:
         return None
     
     try:
+        # CosyVoice with voice matching (zero-shot cloning)
+        if use_cosyvoice and voice_match and reference_audio is not None:
+            if verbose:
+                print("==========================================")
+                print("COSYVOICE ZERO-SHOT CLONING (--voice-match)")
+                print("==========================================")
+                print(f"Using reference audio for voice cloning...")
+            
+            # Save reference audio to a temporary file for CosyVoice
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as ref_fp:
+                ref_audio_path = ref_fp.name
+                sf.write(ref_audio_path, reference_audio, reference_sample_rate)
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            
+            try:
+                cosyvoice_success = cosyvoice_tts(
+                    translated_text, 
+                    cosyvoice_model, 
+                    tts_fp_path, 
+                    reference_audio_path=ref_audio_path,
+                    verbose=verbose
+                )
+                if cosyvoice_success:
+                    if verbose:
+                        print(f"✓ CosyVoice zero-shot cloning successful")
+                        print("==========================================")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if sr != rate:
+                        audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                    tts_pcm = (audio_data * 32768).astype(np.int16)
+                    return tts_pcm
+                else:
+                    if verbose:
+                        print("✗ CosyVoice cloning failed, falling back to standard synthesis")
+                        print("==========================================")
+                    use_cosyvoice = False
+            finally:
+                import builtins
+                if os.path.exists(ref_audio_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(ref_audio_path)
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+        
+        # If CosyVoice without voice matching, use standard synthesis
+        if use_cosyvoice:
+            tts_pcm = synthesize_tts_pcm(
+                translated_text, rate, output_lang,
+                voice_backend="cosyvoice",
+                voice_model=cosyvoice_model,
+                verbose=verbose,
+            )
+            return tts_pcm
+        
         global _cached_matched_voice
         global _cached_output_lang  
         
