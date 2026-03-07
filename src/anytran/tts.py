@@ -315,8 +315,10 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
             print("[CustomTTS][ERROR] qwen-tts is not installed. Please install with: pip install qwen-tts")
             return False
         
-        # Default to CustomVoice model if not specified
-        if not voice_model:
+        # Default to CustomVoice model if not specified or if a Piper model is specified
+        if not voice_model or (voice_model and "Qwen" not in voice_model):
+            if verbose and voice_model:
+                print(f"[CustomTTS] Replacing non-Qwen model '{voice_model}' with default CustomVoice model")
             voice_model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
         
         # Determine if this is a Base model (for voice cloning) or CustomVoice model
@@ -501,8 +503,11 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
             if verbose:
                 print(f"[TTS] Using Custom (Qwen3-TTS) backend")
             
-            # Default to CustomVoice model if not specified
-            if not custom_model:
+            # Default to CustomVoice model if not specified or if a Piper model is specified
+            # (e.g., when using default --voice-model en_US-lessac-medium with --voice-backend custom)
+            if not custom_model or (custom_model and "Qwen" not in custom_model):
+                if verbose and custom_model:
+                    print(f"[TTS] Replacing non-Qwen model '{custom_model}' with default CustomVoice model")
                 custom_model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
@@ -760,7 +765,10 @@ def synthesize_tts_pcm_with_cloning(
                 print(f"Using reference audio for voice cloning with Qwen3-TTS Base model")
             
             # Default to Base model for voice cloning
-            if not custom_model:
+            # Also replace Piper models (e.g., en_US-lessac-medium) with Qwen3-TTS Base
+            if not custom_model or (custom_model and "Qwen" not in custom_model):
+                if verbose and custom_model:
+                    print(f"[TTS] Replacing non-Qwen model '{custom_model}' with default Base model")
                 custom_model = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
             elif "CustomVoice" in custom_model:
                 # If CustomVoice was specified, switch to Base for cloning

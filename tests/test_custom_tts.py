@@ -267,3 +267,52 @@ def test_synthesize_tts_pcm_with_cloning_custom_backend(monkeypatch):
     assert result is not None
     assert isinstance(result, np.ndarray)
     assert result.dtype == np.int16
+
+
+def test_custom_backend_replaces_piper_model(monkeypatch):
+    """Test that Piper model names are replaced with Qwen3-TTS models."""
+    
+    # Mock torch
+    class FakeTorch:
+        class bfloat16:
+            pass
+    
+    model_loads = []
+    
+    class FakeQwen3Model:
+        def get_supported_speakers(self):
+            return ["Ryan"]
+        
+        def generate_custom_voice(self, text, language, speaker):
+            sample_rate = 24000
+            audio = np.zeros(sample_rate, dtype=np.float32)
+            return [audio], sample_rate
+        
+        @staticmethod
+        def from_pretrained(model_name, **kwargs):
+            model_loads.append(model_name)
+            if "Qwen" not in model_name:
+                raise ValueError(f"{model_name} is not a valid model")
+            return FakeQwen3Model()
+    
+    monkeypatch.setattr(tts, "QWEN_TTS_AVAILABLE", True)
+    monkeypatch.setattr(tts, "TORCH_AVAILABLE", True)
+    monkeypatch.setattr(tts, "torch", FakeTorch())
+    monkeypatch.setattr(tts, "Qwen3TTSModel", FakeQwen3Model)
+    monkeypatch.setattr(tts, "_custom_model_cache", {})
+    
+    # Test that Piper model is replaced
+    result = tts.synthesize_tts_pcm(
+        "Hello world",
+        rate=16000,
+        output_lang="en",
+        voice_backend="custom",
+        voice_model="en_US-lessac-medium",  # Piper model
+        verbose=False
+    )
+    
+    assert result is not None
+    assert len(model_loads) == 1
+    # Should have loaded a Qwen model, not the Piper model
+    assert "Qwen" in model_loads[0]
+    assert "en_US-lessac-medium" not in model_loads[0]
