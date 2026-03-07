@@ -316,37 +316,55 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
 
 ### `--voice-backend <backend>`
 - **Type**: Choice
-- **Choices**: `gtts`, `piper`
-- **Default**: `gtts`
+- **Choices**: `gtts`, `piper`, `cosyvoice`, `auto`
+- **Default**: `auto`
 - **Purpose**: Select the TTS engine for voice synthesis
 - **Options**:
   - `gtts`: Google Text-to-Speech (network call, no installation needed)
   - `piper`: Local Piper TTS (fast, private, works offline)
+  - `cosyvoice`: CosyVoice TTS (advanced multilingual TTS with zero-shot voice cloning)
+  - `auto`: Automatically selects best available backend (prefers Piper, falls back to gTTS)
 - **Benefits of `piper`**:
   - Faster (no network calls)
   - Private (no data sent to external services)
   - Works offline
   - Better voice quality for some languages
-- **Requirements**: For `piper` — Piper must be installed (`pip install piper-tts` or binary)
-- **Fallback**: Automatically falls back to gTTS if Piper not found
+- **Benefits of `cosyvoice`**:
+  - State-of-the-art multilingual TTS (9 languages, 18+ Chinese dialects)
+  - Zero-shot voice cloning with `--voice-match`
+  - High-quality, natural speech synthesis
+  - Advanced pronunciation control
+- **Requirements**: 
+  - For `piper`: Piper must be installed (`pip install piper-tts` or binary)
+  - For `cosyvoice`: CosyVoice must be installed (`pip install -e .[cosyvoice]`)
+- **Fallback**: Automatically falls back to gTTS if selected backend not found
 - **Interactions**:
   - Works with `--scribe-voice` and `--slate-voice`
-  - `--voice-model`: Selects which voice model to use when `--voice-backend piper`
+  - `--voice-model`: Selects which voice model to use when `--voice-backend piper` or `cosyvoice`
+  - `--voice-match`: Enables voice cloning for `cosyvoice` or voice matching for `piper`
   - `--voice-lang`: May override voice language
 
 ### `--voice-model <voice-model>`
 - **Type**: Voice model identifier
 - **Default**: `en_US-lessac-medium`
-- **Format**: `{language_code}-{speaker_name}-{quality}`
+- **Format**: 
+  - For Piper: `{language_code}-{speaker_name}-{quality}` (e.g., `en_US-lessac-medium`)
+  - For CosyVoice: Model name or path (e.g., `FunAudioLLM/Fun-CosyVoice3-0.5B-2512`)
 - **Examples**:
-  - `en_US-lessac-medium`: English (US) - clear male voice
-  - `en_US-norman-medium`: English (US) - different speaker
-  - `en_GB-amy-medium`: English (British)
-  - `es_ES-carla-x-low`: Spanish
-  - `fr_FR-siwis-medium`: French
-- **Finding voices**: Check Piper documentation or available voice list
+  - **Piper**:
+    - `en_US-lessac-medium`: English (US) - clear male voice
+    - `en_US-norman-medium`: English (US) - different speaker
+    - `en_GB-amy-medium`: English (British)
+    - `es_ES-carla-x-low`: Spanish
+    - `fr_FR-siwis-medium`: French
+  - **CosyVoice**:
+    - `FunAudioLLM/Fun-CosyVoice3-0.5B-2512`: Latest CosyVoice 3.0 model
+    - `FunAudioLLM/CosyVoice2-0.5B`: CosyVoice 2.0 model
+- **Finding voices**: 
+  - Piper: Check Piper documentation or available voice list
+  - CosyVoice: Check HuggingFace model hub
 - **Interactions**:
-  - Only used if `--voice-backend piper` is specified
+  - Used when `--voice-backend piper` or `--voice-backend cosyvoice` is specified
   - `--voice-lang`: Does not override voice, but should match voice language
 
 ### `--voice-lang <code>`
@@ -365,17 +383,26 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
 ### `--voice-match`
 - **Type**: Boolean flag
 - **Default**: Disabled
-- **Purpose**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics
+- **Purpose**: 
+  - For **Piper**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics
+  - For **CosyVoice**: Enable zero-shot voice cloning using reference audio from input
 - **How it works**:
-  1. Extracts pitch and spectral features from input audio
-  2. Estimates gender (Male: <140Hz, Female: >180Hz)
-  3. Selects the closest matching Piper voice for the target language
-  4. Falls back to default voice if no suitable match found
-- **Requirements**: `pip install -e .[piper]`; Piper TTS must be installed
+  - **Piper**:
+    1. Extracts pitch and spectral features from input audio
+    2. Estimates gender (Male: <140Hz, Female: >180Hz)
+    3. Selects the closest matching Piper voice for the target language
+    4. Falls back to default voice if no suitable match found
+  - **CosyVoice**:
+    1. Uses input audio segments as reference for voice cloning
+    2. Synthesizes output speech in the same voice as the input speaker
+    3. Works across different languages (cross-lingual cloning)
+- **Requirements**: 
+  - For Piper: `pip install -e .[piper]`; Piper TTS must be installed
+  - For CosyVoice: `pip install -e .[cosyvoice]`; CosyVoice must be installed
 - **Interactions**:
-  - Works with `--slate-voice` and Piper TTS
-  - Pairs well with `--voice-backend piper`
-  - See [VOICE_MATCHING.md](VOICE_MATCHING.md) for details
+  - Works with `--slate-voice` and Piper or CosyVoice TTS
+  - Pairs well with `--voice-backend piper` or `--voice-backend cosyvoice`
+  - See [VOICE_MATCHING.md](VOICE_MATCHING.md) for Piper voice matching details
 
 ---
 
