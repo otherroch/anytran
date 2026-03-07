@@ -81,6 +81,7 @@ all = [
   "g2pw",
   "unicode_rbnf",
   "sentence_stream",
+  "qwen-tts",
 ]
 
 [project.scripts]
