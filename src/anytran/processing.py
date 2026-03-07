@@ -505,13 +505,30 @@ def process_audio_chunk(
     # Synthesize slate audio (Translated)
     if stage2_ran and translated_text and slate_tts_segments is not None:
         t0 = time.perf_counter()
+        # Only pass reference_text if target language matches input language (detected_lang)
+        # For cross-language synthesis, passing ref_text in wrong language confuses the model
+        slate_ref_text = None
+        if voice_match and detected_lang:
+            # Normalize language codes for comparison (e.g., "en" vs "en-US")
+            detected_base = detected_lang.lower().split('-')[0]
+            tts_base = tts_lang.lower().split('-')[0] if tts_lang else ""
+            if detected_base == tts_base:
+                slate_ref_text = english_text
+                if verbose:
+                    prefix = f"[Stream {stream_id}] " if stream_id else ""
+                    print(f"{prefix}Stage 3 (TTS - Slate): Same-language synthesis, passing reference_text")
+            elif verbose:
+                prefix = f"[Stream {stream_id}] " if stream_id else ""
+                print(f"{prefix}Stage 3 (TTS - Slate): Cross-language synthesis ({detected_base} → {tts_base})")
+                print(f"{prefix}  - NOT passing reference_text to avoid language confusion")
+        
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             translated_text,
             rate,
             tts_lang,
             reference_audio=audio_segment if voice_match else None,
             reference_sample_rate=rate,
-            reference_text=english_text if voice_match else None,
+            reference_text=slate_ref_text,
             voice_backend=voice_backend,
             voice_model=voice_model,
             voice_match=voice_match,
