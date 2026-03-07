@@ -16,6 +16,13 @@ except ImportError:
     Qwen3TTSModel = None
     QWEN_TTS_AVAILABLE = False
 
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
+
 import tempfile
 
 import librosa
@@ -328,7 +335,10 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
             if verbose:
                 print(f"[CustomTTS] Loading model: {voice_model}")
             try:
-                import torch
+                if not TORCH_AVAILABLE:
+                    print("[CustomTTS][ERROR] torch is not installed. Please install with: pip install torch")
+                    return False
+                
                 model = Qwen3TTSModel.from_pretrained(
                     voice_model,
                     device_map="auto",
