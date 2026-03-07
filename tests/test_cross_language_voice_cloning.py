@@ -8,34 +8,33 @@ to match the target language (required for Qwen3-TTS ICL mode).
 
 import pytest
 import numpy as np
-import os
 from unittest import mock
 
 from anytran import processing
+from anytran import config as anytran_config
 
 
 @pytest.fixture(autouse=True)
-def setup_whisper_cpu_device():
-    """Force Whisper to use CPU and device index 0 for testing to avoid CUDA device errors."""
-    original_device = os.environ.get("WHISPER_CTRANSLATE2_DEVICE")
-    original_device_index = os.environ.get("WHISPER_CTRANSLATE2_DEVICE_INDEX")
+def reset_whisper_config():
+    """
+    Reset Whisper CTranslate2 config before each test to prevent test pollution.
     
-    # Set to CPU to avoid CUDA device errors in test environments
-    os.environ["WHISPER_CTRANSLATE2_DEVICE"] = "cpu"
-    os.environ["WHISPER_CTRANSLATE2_DEVICE_INDEX"] = "0"
+    This prevents issues where test_config_coverage.py sets device_index=1,
+    which can cause CUDA device errors if tests run in certain order.
+    """
+    # Save original config
+    original_config = dict(anytran_config.get_whisper_ctranslate2_config())
+    
+    # Reset to default state (device_index should be None by default)
+    # We need to directly access the module's internal config dict since
+    # set_whisper_ctranslate2_config() ignores None values
+    anytran_config._whisper_ctranslate2_config['device_index'] = None
     
     yield
     
-    # Restore original values
-    if original_device is None:
-        os.environ.pop("WHISPER_CTRANSLATE2_DEVICE", None)
-    else:
-        os.environ["WHISPER_CTRANSLATE2_DEVICE"] = original_device
-        
-    if original_device_index is None:
-        os.environ.pop("WHISPER_CTRANSLATE2_DEVICE_INDEX", None)
-    else:
-        os.environ["WHISPER_CTRANSLATE2_DEVICE_INDEX"] = original_device_index
+    # Restore original config (including None values)
+    for key, value in original_config.items():
+        anytran_config._whisper_ctranslate2_config[key] = value
 
 
 @mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
