@@ -18,20 +18,17 @@ from anytran import whisper_backend
 @pytest.fixture(autouse=True)
 def reset_whisper_config():
     """
-    Reset Whisper CTranslate2 config and clear model cache before each test.
+    Reset Whisper CTranslate2 config and clear model cache before AND after each test.
     
     This prevents issues where test_config_coverage.py sets device_index=1,
     which can cause CUDA device errors if tests run in certain order.
     Also clears the cached Whisper model so it gets recreated with the correct config.
+    
+    We reset to clean defaults both before and after to prevent pollution
+    in either direction (from previous tests or to subsequent tests).
     """
-    # Save original config
-    original_config = dict(anytran_config.get_whisper_ctranslate2_config())
-    
-    # Save original cached model state
-    original_model = whisper_backend._whisper_ctranslate2_model
-    original_model_id = whisper_backend._whisper_ctranslate2_model_id
-    
-    # Reset to default state (device_index should be None by default)
+    # Reset to default state before test
+    # device_index should be None by default to avoid CUDA device errors
     # We need to directly access the module's internal config dict since
     # set_whisper_ctranslate2_config() ignores None values
     anytran_config._whisper_ctranslate2_config['device_index'] = None
@@ -39,16 +36,15 @@ def reset_whisper_config():
     # Clear the cached model so it gets recreated with the correct config
     whisper_backend._whisper_ctranslate2_model = None
     whisper_backend._whisper_ctranslate2_model_id = None
+    whisper_backend._whisper_ctranslate2_device = None
     
     yield
     
-    # Restore original config (including None values)
-    for key, value in original_config.items():
-        anytran_config._whisper_ctranslate2_config[key] = value
-    
-    # Restore original cached model state
-    whisper_backend._whisper_ctranslate2_model = original_model
-    whisper_backend._whisper_ctranslate2_model_id = original_model_id
+    # Reset to default state after test to prevent polluting subsequent tests
+    anytran_config._whisper_ctranslate2_config['device_index'] = None
+    whisper_backend._whisper_ctranslate2_model = None
+    whisper_backend._whisper_ctranslate2_model_id = None
+    whisper_backend._whisper_ctranslate2_device = None
 
 
 @mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
