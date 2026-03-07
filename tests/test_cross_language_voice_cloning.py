@@ -8,9 +8,34 @@ to match the target language (required for Qwen3-TTS ICL mode).
 
 import pytest
 import numpy as np
+import os
 from unittest import mock
 
 from anytran import processing
+
+
+@pytest.fixture(autouse=True)
+def setup_whisper_cpu_device():
+    """Force Whisper to use CPU and device index 0 for testing to avoid CUDA device errors."""
+    original_device = os.environ.get("WHISPER_CTRANSLATE2_DEVICE")
+    original_device_index = os.environ.get("WHISPER_CTRANSLATE2_DEVICE_INDEX")
+    
+    # Set to CPU to avoid CUDA device errors in test environments
+    os.environ["WHISPER_CTRANSLATE2_DEVICE"] = "cpu"
+    os.environ["WHISPER_CTRANSLATE2_DEVICE_INDEX"] = "0"
+    
+    yield
+    
+    # Restore original values
+    if original_device is None:
+        os.environ.pop("WHISPER_CTRANSLATE2_DEVICE", None)
+    else:
+        os.environ["WHISPER_CTRANSLATE2_DEVICE"] = original_device
+        
+    if original_device_index is None:
+        os.environ.pop("WHISPER_CTRANSLATE2_DEVICE_INDEX", None)
+    else:
+        os.environ["WHISPER_CTRANSLATE2_DEVICE_INDEX"] = original_device_index
 
 
 @mock.patch('anytran.processing.synthesize_tts_pcm_with_cloning')
