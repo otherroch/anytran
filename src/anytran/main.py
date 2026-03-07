@@ -534,10 +534,7 @@ def _validate_pipeline_args(args, parser):
         try:
             from cosyvoice.cli.cosyvoice import CosyVoice
         except ImportError:
-            print("Warning: --voice-backend cosyvoice specified but CosyVoice not installed.")
-            print("Install with: pip install -e .[cosyvoice]")
-            print("Falling back to gTTS.")
-            args.voice_backend = "gtts"
+            _fallback_to_gtts("cosyvoice", "CosyVoice not installed. Install with: pip install -e .[cosyvoice]")
 
 
 def _configure_backends(args):

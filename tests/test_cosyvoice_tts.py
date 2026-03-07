@@ -34,8 +34,10 @@ def test_cosyvoice_tts_basic_synthesis(monkeypatch, tmp_path):
     """Test basic CosyVoice TTS synthesis without reference audio."""
     output_wav = tmp_path / "output.wav"
     
-    # Mock audio output
-    mock_audio = np.random.randn(22050)  # 1 second at 22050 Hz
+    # Mock audio output - 1 second at 22050 Hz
+    sample_rate = 22050
+    duration_seconds = 1.0
+    mock_audio = np.random.randn(int(sample_rate * duration_seconds))
     
     class FakeCosyVoice:
         def __init__(self, model_path):
