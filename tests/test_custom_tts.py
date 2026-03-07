@@ -124,8 +124,8 @@ def test_custom_tts_with_voice_cloning(tmp_path, monkeypatch):
     monkeypatch.setattr(tts, "Qwen3TTSModel", FakeQwen3Model)
     monkeypatch.setattr(tts, "_custom_model_cache", {})
     
-    # Create reference audio (1 second of random noise)
-    ref_audio = np.random.randn(16000).astype(np.float32)
+    # Create reference audio (1 second of random noise, clipped to valid audio range)
+    ref_audio = np.clip(np.random.randn(16000), -1.0, 1.0).astype(np.float32)
     
     result = tts.custom_tts(
         "Hello world",
@@ -249,8 +249,8 @@ def test_synthesize_tts_pcm_with_cloning_custom_backend(monkeypatch):
     monkeypatch.setattr(tts, "Qwen3TTSModel", FakeQwen3Model)
     monkeypatch.setattr(tts, "_custom_model_cache", {})
     
-    # Create reference audio
-    ref_audio = np.random.randn(16000).astype(np.int16)
+    # Create reference audio (properly scaled int16 audio)
+    ref_audio = (np.clip(np.random.randn(16000), -1.0, 1.0) * 32767).astype(np.int16)
     
     result = tts.synthesize_tts_pcm_with_cloning(
         "Hello world",

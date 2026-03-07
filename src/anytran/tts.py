@@ -57,8 +57,6 @@ from .voice_matcher import (
 #   PiperVoice instances, so that models are loaded only once per process.
 # - _custom_model_cache: a mapping from model names to Qwen3TTSModel instances,
 #   so that models are loaded only once per process.
-# - _custom_voice_clone_prompt: cached voice clone prompt for custom backend
-#   when using voice matching with reference audio.
 # These caches are initialized at import time and are updated by helper functions
 # in this module; they are internal implementation details and should not be
 # modified directly by callers.
@@ -66,7 +64,6 @@ _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
 _custom_model_cache = {}
-_custom_voice_clone_prompt = None
 
 
 def _find_piper_config_path(model_path):
@@ -312,7 +309,6 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
         True if successful, False otherwise
     """
     global _custom_model_cache
-    global _custom_voice_clone_prompt
     
     try:
         if not QWEN_TTS_AVAILABLE:
@@ -754,7 +750,6 @@ def synthesize_tts_pcm_with_cloning(
     try:
         global _cached_matched_voice
         global _cached_output_lang
-        global _custom_voice_clone_prompt
         
         # Custom backend with voice matching uses Base model for voice cloning
         if use_custom and voice_match and reference_audio is not None:
