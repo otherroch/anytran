@@ -370,22 +370,18 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
 
 
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
-    use_piper = voice_backend == "piper"
-    use_cosyvoice = voice_backend == "cosyvoice"
-    piper_voice = voice_model
-    cosyvoice_model = voice_model
-
-    # print(f"[TRACE] play_output called with use_piper={use_piper}, piper_voice={piper_voice}, lang={lang}, play_audio={play_audio}, wav_file={wav_file}, rate={rate}")
+    # print(f"[TRACE] play_output called with voice_backend={voice_backend}, voice_model={voice_model}, lang={lang}, play_audio={play_audio}, wav_file={wav_file}, rate={rate}")
     if not translated_text:
         return
 
     try:
-        if use_cosyvoice:
+        # Try CosyVoice backend
+        if voice_backend == "cosyvoice":
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
                 tts_fp_path = tts_fp.name
 
             try:
-                if cosyvoice_tts(translated_text, cosyvoice_model, tts_fp_path, verbose=False):
+                if cosyvoice_tts(translated_text, voice_model, tts_fp_path, verbose=False):
                     if play_audio:
                         if sys.platform == "win32":
                             subprocess.Popen(
@@ -405,19 +401,20 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
                         if sr != rate:
                             audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
                         wav_file.writeframes((audio_data * 32768).astype(np.int16).tobytes())
-                else:
-                    use_cosyvoice = False
+                    return  # Success, exit early
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
+            # If we reach here, CosyVoice failed; fall through to gTTS
 
-        if use_piper and piper_voice and not use_cosyvoice:
+        # Try Piper backend
+        elif voice_backend == "piper" and voice_model:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
                 tts_fp_path = tts_fp.name
 
             try:
-                if piper_tts(translated_text, piper_voice, tts_fp_path, verbose=False):
+                if piper_tts(translated_text, voice_model, tts_fp_path, verbose=False):
                     if play_audio:
                         if sys.platform == "win32":
                             subprocess.Popen(
@@ -437,35 +434,35 @@ def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate
                         if sr != rate:
                             audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
                         wav_file.writeframes((audio_data * 32768).astype(np.int16).tobytes())
-                else:
-                    use_piper = False
+                    return  # Success, exit early
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
+            # If we reach here, Piper failed; fall through to gTTS
 
-        if not use_piper and not use_cosyvoice:
-            if not _ensure_gtts_available():
-                return
-            tts_lang = lang.split("-")[0]
-            tts = gTTS(text=translated_text, lang=tts_lang)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tts_fp:
-                tts.save(tts_fp.name)
-                tts_fp_path = tts_fp.name
-            try:
-                if play_audio:
-                    if playsound is None:
-                        print("[PlaySound][WARN] playsound3 is not installed; skipping playback.")
-                    else:
-                        playsound(tts_fp_path)
-                if wav_file:
-                    tts_audio = AudioSegment.from_mp3(tts_fp_path)
-                    wav_data = tts_audio.set_frame_rate(rate).set_channels(1).set_sample_width(2)
-                    wav_file.writeframes(wav_data.raw_data)
-            finally:
-                import builtins
-                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
-                    os.remove(tts_fp_path)
+        # Fallback to gTTS (or primary backend if no other backend specified)
+        if not _ensure_gtts_available():
+            return
+        tts_lang = lang.split("-")[0]
+        tts = gTTS(text=translated_text, lang=tts_lang)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tts_fp:
+            tts.save(tts_fp.name)
+            tts_fp_path = tts_fp.name
+        try:
+            if play_audio:
+                if playsound is None:
+                    print("[PlaySound][WARN] playsound3 is not installed; skipping playback.")
+                else:
+                    playsound(tts_fp_path)
+            if wav_file:
+                tts_audio = AudioSegment.from_mp3(tts_fp_path)
+                wav_data = tts_audio.set_frame_rate(rate).set_channels(1).set_sample_width(2)
+                wav_file.writeframes(wav_data.raw_data)
+        finally:
+            import builtins
+            if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                os.remove(tts_fp_path)
     except Exception as exc:
         print(f"TTS playback failed: {exc}")
 

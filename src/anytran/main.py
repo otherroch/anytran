@@ -513,21 +513,24 @@ def _validate_pipeline_args(args, parser):
         print("Warning: --scribe-vad specified but Silero VAD not installed. Install with: pip install silero-vad")
         print("Falling back to magnitude threshold for speech detection.")
     
+    # Voice backend availability checks
+    def _fallback_to_gtts(backend_name, reason):
+        """Helper to handle fallback to gTTS with consistent messaging."""
+        print(f"Warning: --voice-backend {backend_name} specified but {reason}")
+        print("Falling back to gTTS.")
+        args.voice_backend = "gtts"
+    
     # Piper check
     if args.voice_backend == "piper":
         try:
             result = subprocess.run(["piper", "--help"], capture_output=True, timeout=2)
             if result.returncode != 0:
-                print("Warning: --voice-backend piper specified but Piper not found.")
-                print("Falling back to gTTS.")
-                args.voice_backend = "gtts"
+                _fallback_to_gtts("piper", "Piper not found.")
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            print("Warning: --voice-backend piper specified but Piper not found.")
-            print("Falling back to gTTS.")
-            args.voice_backend = "gtts"
+            _fallback_to_gtts("piper", "Piper not found.")
     
     # CosyVoice check
-    if args.voice_backend == "cosyvoice":
+    elif args.voice_backend == "cosyvoice":
         try:
             from cosyvoice.cli.cosyvoice import CosyVoice
         except ImportError:
