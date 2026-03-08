@@ -11,7 +11,7 @@ except ImportError:
 
 # CosyVoice import detection
 try:
-    from cosyvoice.cli.cosyvoice import CosyVoice
+    from cosyvoice.cli.cosyvoice import AutoModel as CosyVoice
     COSYVOICE_AVAILABLE = True
 except ImportError:
     CosyVoice = None
@@ -432,7 +432,7 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
         return False
 
 
-def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbose=False):
+def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, reference_text=None, verbose=False):
     """
     Generate speech using CosyVoice TTS.
     
@@ -446,6 +446,8 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
         Output WAV file path
     reference_audio_path : str or None
         Path to reference audio for voice cloning
+    reference_text : str or None
+        Text corresponding to the reference audio for voice cloning
     verbose : bool
         Print debug information
         
@@ -475,7 +477,7 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
             
             # Try to load from local path first, then from HuggingFace
             if os.path.isdir(model_name):
-                model = CosyVoice(model_name)
+                model = CosyVoice(model_dir=model_name)
             else:
                 # Load from HuggingFace or ModelScope
                 try:
@@ -485,12 +487,12 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
                         if verbose:
                             print(f"[CosyVoice] Downloading model to {local_dir}")
                         snapshot_download(model_name, local_dir=local_dir)
-                    model = CosyVoice(local_dir)
+                    model = CosyVoice(model_dir=local_dir)
                 except ImportError:
                     # Fall back to loading directly if modelscope not available
                     if verbose:
                         print(f"[CosyVoice] ModelScope not available, trying direct load")
-                    model = CosyVoice(model_name)
+                    model = CosyVoice(model_dir=model_name)
                     
             _cosyvoice_model_cache[model_name] = model
             if verbose:
@@ -508,12 +510,12 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
             if verbose:
                 print(f"[CosyVoice] Using reference audio: {reference_audio_path}")
             # CosyVoice inference with reference audio (zero-shot cloning)
-            output = model.inference_zero_shot(text, reference_audio_path)
+            output = model.inference_zero_shot(text, prompt_wav=reference_audio_path, prompt_text=reference_text)
         else:
             # Standard TTS inference
             if verbose:
                 print(f"[CosyVoice] Using standard TTS (no reference audio)")
-            output = model.inference_sft(text)
+            output = model.inference_sft(text, spk_id=0)
         
         # Save to WAV file
         # CosyVoice output is typically a tensor or numpy array
@@ -1020,6 +1022,7 @@ def synthesize_tts_pcm_with_cloning(
                     cosyvoice_model, 
                     tts_fp_path, 
                     reference_audio_path=ref_audio_path,
+                    reference_text=reference_text,
                     verbose=verbose
                 )
                 if cosyvoice_success:
