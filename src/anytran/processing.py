@@ -456,15 +456,16 @@ def process_audio_chunk(
             prefix = f"[Stream {stream_id}] " if stream_id else ""
             print(f"{prefix}NOTE: LangSwap changed translation target but Stage 2 was skipped (target is English)")
             print(f"{prefix}  - This means the original target was English, so no text translation occurred")
-            print(f"{prefix}  - However, we will still synthesize TTS for the final text language (which may be non-English)")      
+            print(f"{prefix}  - However, we will still synthesize TTS for the final text language")      
         
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             english_text,
             rate,
-            "en",
+            tts_lang,
             reference_audio=audio_segment if voice_match else None,
             reference_sample_rate=rate,
+            reference_text=english_text if voice_match else None,
             voice_backend=voice_backend,
             voice_model=voice_model,
             voice_match=voice_match,
@@ -473,12 +474,12 @@ def process_audio_chunk(
         add_timing(timings, "stage3_tts_synthesis", t0)
         if verbose:
             prefix = f"[Stream {stream_id}] " if stream_id else ""
-            print(f"{prefix}Stage 3 (TTS - Slate/English): Generated voice audio")
+            print(f"{prefix}Stage 3 (TTS - Slate/{tts_lang}): Generated voice audio")
             if slate_tts_pcm is not None:
                 print(f"{prefix}  - Slate TTS PCM length: {len(slate_tts_pcm)} samples")
                 
     # Synthesize scribe audio (English)
-    if not stage2_ran and english_text and scribe_tts_segments is not None:
+    if english_text and scribe_tts_segments is not None:
 
         t0 = time.perf_counter()
         scribe_tts_pcm = synthesize_tts_pcm_with_cloning(
@@ -487,6 +488,7 @@ def process_audio_chunk(
             "en",
             reference_audio=audio_segment if voice_match else None,
             reference_sample_rate=rate,
+            reference_text=english_text if voice_match else None,
             voice_backend=voice_backend,
             voice_model=voice_model,
             voice_match=voice_match,
@@ -503,12 +505,54 @@ def process_audio_chunk(
     # Synthesize slate audio (Translated)
     if stage2_ran and translated_text and slate_tts_segments is not None:
         t0 = time.perf_counter()
+        # For voice cloning, we need reference_text in the TARGET language
+        # Qwen3-TTS requires ref_text in ICL mode, and it should match the target language
+        slate_ref_text = None
+        if voice_match and detected_lang and english_text:
+            # Normalize language codes for comparison (e.g., "en" vs "en-US")
+            detected_base = detected_lang.lower().split('-')[0]
+            tts_base = tts_lang.lower().split('-')[0] if tts_lang else ""
+            
+            if detected_base == tts_base:
+                # Same language: use original reference text
+                slate_ref_text = english_text
+                if verbose:
+                    prefix = f"[Stream {stream_id}] " if stream_id else ""
+                    print(f"{prefix}Stage 3 (TTS - Slate): Same-language synthesis, using original reference_text")
+            else:
+                # Cross-language: translate reference_text to target language
+                # This is required for Qwen3-TTS ICL mode
+                if verbose:
+                    prefix = f"[Stream {stream_id}] " if stream_id else ""
+                    print(f"{prefix}Stage 3 (TTS - Slate): Cross-language synthesis ({detected_base} → {tts_base})")
+                    print(f"{prefix}  - Translating reference_text to target language for voice cloning")
+                
+                slate_ref_text = translate_text(
+                    english_text,
+                    source_lang=detected_lang,
+                    target_lang=tts_lang,
+                    backend=slate_backend,
+                    verbose=False  # Don't spam translation details
+                )
+                
+                if slate_ref_text and verbose:
+                    prefix = f"[Stream {stream_id}] " if stream_id else ""
+                    print(f"{prefix}  - Translated reference_text: '{slate_ref_text[:50]}...'")
+                elif not slate_ref_text:
+                    # Translation failed, use the translated_text itself as ref_text
+                    # This ensures the model gets some ref_text (required in ICL mode)
+                    slate_ref_text = translated_text
+                    if verbose:
+                        prefix = f"[Stream {stream_id}] " if stream_id else ""
+                        print(f"{prefix}  - Translation failed, using target text as reference_text")
+        
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             translated_text,
             rate,
             tts_lang,
             reference_audio=audio_segment if voice_match else None,
             reference_sample_rate=rate,
+            reference_text=slate_ref_text,
             voice_backend=voice_backend,
             voice_model=voice_model,
             voice_match=voice_match,
