@@ -23,6 +23,33 @@ except ImportError:
     torch = None
     TORCH_AVAILABLE = False
 
+try:
+    from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
+    from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
+    from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
+    from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
+    # fish_speech/models/dac/inference.py calls pyrootutils.setup_root() at module
+    # level to find the source-tree root.  When fish-speech is pip-installed the
+    # .project-root marker file is absent and the call raises FileNotFoundError.
+    # pip already placed everything on sys.path, so temporarily replace setup_root
+    # with a no-op to let the import succeed, then restore the original.
+    import pyrootutils as _pyrootutils
+    _pyrootutils_orig = _pyrootutils.setup_root
+    _pyrootutils.setup_root = lambda *a, **kw: None
+    try:
+        from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
+    finally:
+        _pyrootutils.setup_root = _pyrootutils_orig
+    del _pyrootutils, _pyrootutils_orig
+    FISH_TTS_AVAILABLE = True
+except Exception:
+    _FishTTSInferenceEngine = None
+    _fish_load_decoder_model = None
+    _fish_launch_llama_queue = None
+    _FishServeReferenceAudio = None
+    _FishServeTTSRequest = None
+    FISH_TTS_AVAILABLE = False
+
 import tempfile
 
 import librosa
@@ -57,6 +84,8 @@ from .voice_matcher import (
 #   PiperVoice instances, so that models are loaded only once per process.
 # - _custom_model_cache: a mapping from model names to Qwen3TTSModel instances,
 #   so that models are loaded only once per process.
+# - _fish_model_cache: a mapping from model names to TTSInferenceEngine instances,
+#   so that fish-speech models are loaded only once per process.
 # These caches are initialized at import time and are updated by helper functions
 # in this module; they are internal implementation details and should not be
 # modified directly by callers.
@@ -64,6 +93,20 @@ _cached_matched_voice = None
 _cached_output_lang = None
 _piper_voice_cache = {}
 _custom_model_cache = {}
+_fish_model_cache = {}
+
+# Fish-speech model name aliases: the problem statement uses "fishaudio/s1-mini"
+# but the canonical HuggingFace repo is "fishaudio/openaudio-s1-mini".
+_FISH_MODEL_ALIASES = {
+    "fishaudio/s1-mini": "fishaudio/openaudio-s1-mini",
+}
+
+
+def _normalize_fish_model_name(model_name):
+    """Resolve fish-speech model aliases and return the canonical HuggingFace repo id."""
+    if not model_name:
+        return "fishaudio/openaudio-s1-mini"
+    return _FISH_MODEL_ALIASES.get(model_name, model_name)
 
 
 def _find_piper_config_path(model_path):
@@ -413,6 +456,247 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
         return False
 
 
+def _load_fish_engine(model_name, verbose=False):
+    """
+    Load a fish-speech TTSInferenceEngine for the given HuggingFace model repo.
+
+    The function downloads the model checkpoint via ``huggingface_hub`` (or
+    reuses an already-cached download) and then initialises the LLaMA language
+    model queue and the VQ-GAN decoder before wrapping them in a
+    ``TTSInferenceEngine`` instance.
+
+    Returns the engine on success, or ``None`` on failure.
+    """
+    import traceback as _traceback
+
+    try:
+        from pathlib import Path
+
+        if not TORCH_AVAILABLE:
+            print("[FishTTS][ERROR] torch is not installed. Please install with: pip install torch")
+            return None
+
+        try:
+            import torchaudio as _torchaudio  # noqa: F401
+        except ImportError:
+            print("[FishTTS][ERROR] torchaudio is not installed. "
+                  "Please install a version matching your torch installation, e.g.: "
+                  "pip install torchaudio")
+            return None
+
+        if not hasattr(_torchaudio, "list_audio_backends"):
+            # list_audio_backends was removed in torchaudio 2.x nightlies and was
+            # absent in very old releases.  fish-speech's ReferenceLoader calls it
+            # in __init__ only to choose between "ffmpeg" and "soundfile" backends.
+            # Patch a shim onto the module so the engine can always be constructed.
+            import importlib.util as _ilu
+
+            def _list_audio_backends_shim():
+                backends = []
+                if _ilu.find_spec("soundfile") is not None:
+                    backends.append("soundfile")
+                try:
+                    import torchaudio.backend.ffmpeg_backend as _ffb  # noqa: F401
+                    backends.append("ffmpeg")
+                except ImportError:
+                    pass
+                return backends
+
+            _torchaudio.list_audio_backends = _list_audio_backends_shim
+
+        from huggingface_hub import snapshot_download
+
+        if verbose:
+            print(f"[FishTTS] Downloading/locating checkpoint: {model_name}")
+
+        checkpoint_dir = snapshot_download(model_name)
+        checkpoint_path = Path(checkpoint_dir)
+        decoder_path = checkpoint_path / "codec.pth"
+
+        if not decoder_path.exists():
+            print(f"[FishTTS][ERROR] codec.pth not found in {checkpoint_dir}")
+            return None
+
+        # Pick the best available device
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+
+        precision = torch.bfloat16
+
+        if verbose:
+            print(f"[FishTTS] Loading LLaMA model on {device}...")
+
+        llama_queue = _fish_launch_llama_queue(
+            checkpoint_path=checkpoint_path,
+            device=device,
+            precision=precision,
+            compile=False,
+        )
+
+        if verbose:
+            print(f"[FishTTS] Loading VQ-GAN decoder from {decoder_path}...")
+
+        decoder_model = _fish_load_decoder_model(
+            config_name="modded_dac_vq",
+            checkpoint_path=decoder_path,
+            device=device,
+        )
+
+        engine = _FishTTSInferenceEngine(
+            llama_queue=llama_queue,
+            decoder_model=decoder_model,
+            precision=precision,
+            compile=False,
+        )
+
+        if verbose:
+            print(f"[FishTTS] ✓ Engine loaded successfully")
+
+        return engine
+
+    except Exception as exc:
+        print(f"[FishTTS][ERROR] Failed to load engine: {exc}")
+        _traceback.print_exc()
+        return None
+
+
+def fish_tts(text, voice_model, output_wav, reference_audio=None, reference_sample_rate=16000, reference_text=None, verbose=False):
+    """
+    Synthesize text to audio using fish-speech (s1-mini or fish-speech-1.5).
+
+    Parameters
+    ----------
+    text : str
+        Text to synthesize.
+    voice_model : str
+        HuggingFace model repo: ``"fishaudio/s1-mini"`` (alias for
+        ``"fishaudio/openaudio-s1-mini"``) or ``"fishaudio/fish-speech-1.5"``.
+        When *None* or an empty string the default ``"fishaudio/openaudio-s1-mini"``
+        is used.
+    output_wav : str
+        Path to output WAV file.
+    reference_audio : np.ndarray or None
+        Reference audio for voice cloning (int16 PCM or float32 in [-1, 1]).
+        When provided along with *reference_text* the model performs zero-shot
+        voice cloning.
+    reference_sample_rate : int
+        Sample rate of *reference_audio* (default: 16000 Hz).
+    reference_text : str or None
+        Transcript of the reference audio.  Providing an accurate transcript
+        improves cloning quality.
+    verbose : bool
+        Print debug information.
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` on any failure.
+    """
+    global _fish_model_cache
+
+    try:
+        if not FISH_TTS_AVAILABLE:
+            print("[FishTTS][ERROR] fish-speech is not installed. "
+                  "Please install with: pip install fish-speech")
+            return False
+
+        model_name = _normalize_fish_model_name(voice_model)
+
+        # Load / reuse cached inference engine
+        if model_name in _fish_model_cache:
+            if verbose:
+                print(f"[FishTTS] Reusing cached engine for model: {model_name}")
+            engine = _fish_model_cache[model_name]
+        else:
+            if verbose:
+                print(f"[FishTTS] Loading model: {model_name}")
+            engine = _load_fish_engine(model_name, verbose=verbose)
+            if engine is None:
+                return False
+            _fish_model_cache[model_name] = engine
+
+        # Build reference list for voice cloning
+        references = []
+        if reference_audio is not None:
+            import io
+            import wave as _wave
+
+            ref_float = reference_audio.astype(np.float32)
+            # Normalise from int16 range if needed
+            if ref_float.max() > 1.0 or ref_float.min() < -1.0:
+                ref_float = ref_float / 32768.0
+
+            # fish-speech expects 44.1 kHz audio
+            target_sr = 44100
+            if reference_sample_rate != target_sr:
+                try:
+                    ref_float = librosa.resample(
+                        ref_float, orig_sr=reference_sample_rate, target_sr=target_sr
+                    )
+                except Exception as resample_exc:
+                    if verbose:
+                        print(f"[FishTTS] Reference audio resample failed: {resample_exc}")
+
+            # Encode as WAV bytes
+            wav_buffer = io.BytesIO()
+            with _wave.open(wav_buffer, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(target_sr)
+                wf.writeframes(np.clip(ref_float * 32767, -32768, 32767).astype(np.int16).tobytes())
+            wav_bytes = wav_buffer.getvalue()
+
+            references.append(
+                _FishServeReferenceAudio(
+                    audio=wav_bytes,
+                    text=reference_text if reference_text else "",
+                )
+            )
+
+        # Build the inference request
+        request = _FishServeTTSRequest(
+            text=text,
+            references=references,
+            format="wav",
+            chunk_length=200,
+            top_p=0.8,
+            repetition_penalty=1.1,
+            temperature=0.8,
+        )
+
+        if verbose:
+            clone_info = " (with voice cloning)" if references else ""
+            print(f"[FishTTS] Synthesizing text{clone_info}...")
+
+        # Run inference and collect the final audio segment
+        final_audio = None
+        final_sr = None
+        for result in engine.inference(request):
+            if result.code == "final":
+                final_sr, final_audio = result.audio
+                break
+            elif result.code == "error":
+                print(f"[FishTTS][ERROR] Inference failed: {result.error}")
+                return False
+
+        if final_audio is None:
+            print("[FishTTS][ERROR] No audio produced by model")
+            return False
+
+        sf.write(output_wav, final_audio, final_sr)
+
+        if verbose:
+            print(f"[FishTTS] ✓ Synthesis successful, saved to {output_wav}")
+        return True
+
+    except Exception as exc:
+        print(f"[FishTTS][ERROR] TTS exception: {exc}")
+        return False
+
 
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
@@ -489,8 +773,10 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     
     use_piper = voice_backend == "piper"
     use_custom = voice_backend == "custom"
+    use_fish = voice_backend == "fish"
     piper_voice = voice_model
     custom_model = voice_model
+    fish_model = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
     if not translated_text:
@@ -498,6 +784,60 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
 
     tts_pcm = None
     try:
+        # Fish TTS backend (fish-speech)
+        if use_fish:
+            if verbose:
+                print(f"[TTS] Using Fish (fish-speech) backend")
+
+            # Replace non-fish model names (e.g. default Piper voice) with the
+            # default fish-speech model
+            if not fish_model or "/" not in fish_model:
+                if verbose and fish_model:
+                    print(f"[TTS] Replacing non-fish model '{fish_model}' with default fish-speech model")
+                fish_model = "fishaudio/openaudio-s1-mini"
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                fish_success = fish_tts(
+                    translated_text,
+                    fish_model,
+                    tts_fp_path,
+                    verbose=verbose,
+                )
+                if fish_success:
+                    if verbose:
+                        print(f"[TTS] Fish result: SUCCESS (model={fish_model})")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if not audio_data.size:
+                        if verbose:
+                            print(f"[TTS] Fish result: no data")
+                        use_fish = False
+                    else:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                            if not audio_data.size:
+                                if verbose:
+                                    print(f"[TTS] librosa resample result: no data")
+                                use_fish = False
+                        if use_fish and audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Fish synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                else:
+                    if verbose:
+                        print(f"[TTS] Fish TTS failed, falling back to gTTS")
+                    use_fish = False
+            except Exception as fish_exc:
+                if verbose:
+                    print(f"[TTS] Fish synthesis failed: {fish_exc}")
+                use_fish = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
         # Custom TTS backend (Qwen3-TTS)
         if use_custom:
             if verbose:
@@ -639,7 +979,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper and not use_custom:
+        if not use_piper and not use_custom and not use_fish:
             if not _ensure_gtts_available(verbose=verbose):
                 return None
             tts_lang = lang_base
@@ -720,13 +1060,15 @@ def synthesize_tts_pcm_with_cloning(
     reference_text : str or None
         Transcript of reference audio (improves voice cloning quality for custom backend)
     voice_backend : str
-        TTS backend to use: ``"piper"``, ``"gtts"``, or ``"custom"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"gtts"``, ``"custom"``, or ``"fish"`` (default: ``"gtts"``)
     voice_model : str or None
         Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``,
-        or as the Qwen3-TTS model when ``voice_backend`` is ``"custom"``)
+        the Qwen3-TTS model when ``voice_backend`` is ``"custom"``, or the fish-speech model
+        when ``voice_backend`` is ``"fish"``)
     voice_match : bool
         Auto-select Piper voice based on input voice features (for piper backend),
-        or use voice cloning with reference audio (for custom backend)
+        use voice cloning with reference audio (for custom backend),
+        or perform zero-shot voice cloning (for fish backend)
     verbose : bool
         Print debug information
     
@@ -744,13 +1086,18 @@ def synthesize_tts_pcm_with_cloning(
     
     For custom backend with voice_match, the Base model is used with reference
     audio for voice cloning.
+
+    For fish backend with voice_match, zero-shot voice cloning is performed
+    using the reference audio as the speaker prompt.
     """ 
   
     
     use_piper = voice_backend == "piper"
     use_custom = voice_backend == "custom"
+    use_fish = voice_backend == "fish"
     piper_voice = voice_model
     custom_model = voice_model
+    fish_model = voice_model
 
     if not translated_text:
         return None
@@ -758,7 +1105,63 @@ def synthesize_tts_pcm_with_cloning(
     try:
         global _cached_matched_voice
         global _cached_output_lang
-        
+
+        # Fish backend with voice matching uses zero-shot voice cloning
+        if use_fish and voice_match and reference_audio is not None:
+            if verbose:
+                print("==========================================")
+                print("FISH VOICE CLONING (--voice-match)")
+                print("==========================================")
+                print(f"Using reference audio for zero-shot voice cloning with fish-speech")
+
+            # Replace non-fish model names with the default fish-speech model
+            if not fish_model or "/" not in fish_model:
+                if verbose and fish_model:
+                    print(f"[TTS] Replacing non-fish model '{fish_model}' with default fish-speech model")
+                fish_model = "fishaudio/openaudio-s1-mini"
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                fish_success = fish_tts(
+                    translated_text,
+                    fish_model,
+                    tts_fp_path,
+                    reference_audio=reference_audio,
+                    reference_sample_rate=reference_sample_rate,
+                    reference_text=reference_text,
+                    verbose=verbose,
+                )
+
+                if fish_success:
+                    if verbose:
+                        print(f"[TTS] Fish voice cloning result: SUCCESS")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Fish voice cloning complete: {len(tts_pcm)} samples")
+                                print("==========================================")
+                            return tts_pcm
+
+                if verbose:
+                    print(f"[TTS] Fish voice cloning failed, falling back to standard synthesis")
+                    print("==========================================")
+                use_fish = False
+
+            except Exception as fish_exc:
+                if verbose:
+                    print(f"[TTS] Fish voice cloning failed: {fish_exc}")
+                    print("==========================================")
+                use_fish = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
         # Custom backend with voice matching uses Base model for voice cloning
         if use_custom and voice_match and reference_audio is not None:
             if verbose:
@@ -913,8 +1316,11 @@ def synthesize_tts_pcm_with_cloning(
                         print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
                     piper_voice = lang_voice
 
-        # Standard TTS synthesis (Piper, Custom, or gTTS)
-        if use_custom:
+        # Standard TTS synthesis (Fish, Piper, Custom, or gTTS)
+        if use_fish:
+            backend = "fish"
+            model = fish_model if (fish_model and "/" in fish_model) else "fishaudio/openaudio-s1-mini"
+        elif use_custom:
             backend = "custom"
             model = custom_model if custom_model else "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
         elif use_piper:
