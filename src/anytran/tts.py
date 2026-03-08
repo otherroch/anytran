@@ -508,12 +508,12 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
             if verbose:
                 print(f"[CosyVoice] Using reference audio: {reference_audio_path}")
             # CosyVoice inference with reference audio (zero-shot cloning)
-            output = model.inference_zero_shot(text, reference_audio_path)
+            output = model.inference_zero_shot(text, prompt_wav=reference_audio_path)
         else:
             # Standard TTS inference
             if verbose:
                 print(f"[CosyVoice] Using standard TTS (no reference audio)")
-            output = model.inference_sft(text)
+            output = model.inference_sft(text, spk_id=0)
         
         # Save to WAV file
         # CosyVoice output is typically a tensor or numpy array
