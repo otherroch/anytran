@@ -24,6 +24,13 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 try:
+    from indextts.infer_v2 import IndexTTS2 as _IndexTTS2
+    INDEXTTS_AVAILABLE = True
+except Exception:
+    _IndexTTS2 = None
+    INDEXTTS_AVAILABLE = False
+
+try:
     from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
     from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
     from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
@@ -94,6 +101,9 @@ _cached_output_lang = None
 _piper_voice_cache = {}
 _custom_model_cache = {}
 _fish_model_cache = {}
+_indextts_model_cache = {}
+
+_INDEXTTS_DEFAULT_MODEL = "IndexTeam/IndexTTS-2"
 
 # Fish-speech model name aliases: the problem statement uses "fishaudio/s1-mini"
 # but the canonical HuggingFace repo is "fishaudio/openaudio-s1-mini".
@@ -698,6 +708,153 @@ def fish_tts(text, voice_model, output_wav, reference_audio=None, reference_samp
         return False
 
 
+def _load_indextts_engine(model_name, verbose=False):
+    """
+    Load an IndexTTS2 engine for the given HuggingFace model repo.
+
+    Downloads the model checkpoint via ``huggingface_hub`` (or reuses an
+    already-cached download) and initialises an ``IndexTTS2`` instance.
+
+    Returns the engine on success, or ``None`` on failure.
+    """
+    import traceback as _traceback
+
+    try:
+        from pathlib import Path
+        from huggingface_hub import snapshot_download
+
+        if verbose:
+            print(f"[IndexTTS] Downloading/locating checkpoint: {model_name}")
+
+        checkpoint_dir = snapshot_download(model_name)
+        cfg_path = str(Path(checkpoint_dir) / "config.yaml")
+
+        if verbose:
+            print(f"[IndexTTS] Loading model from {checkpoint_dir}...")
+
+        engine = _IndexTTS2(
+            cfg_path=cfg_path,
+            model_dir=checkpoint_dir,
+            use_fp16=False,
+            use_cuda_kernel=False,
+            use_deepspeed=False,
+        )
+
+        if verbose:
+            print(f"[IndexTTS] ✓ Engine loaded successfully")
+
+        return engine
+
+    except Exception as exc:
+        print(f"[IndexTTS][ERROR] Failed to load engine: {exc}")
+        _traceback.print_exc()
+        return None
+
+
+def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_sample_rate=16000, verbose=False):
+    """
+    Synthesize text to audio using IndexTTS (IndexTeam/IndexTTS-2 or compatible).
+
+    Parameters
+    ----------
+    text : str
+        Text to synthesize.
+    voice_model : str
+        HuggingFace model repo, e.g. ``"IndexTeam/IndexTTS-2"``.
+        When *None* or an empty string the default ``"IndexTeam/IndexTTS-2"`` is used.
+    output_wav : str
+        Path to output WAV file.
+    reference_audio : np.ndarray or None
+        Reference audio for voice cloning (int16 PCM or float32 in [-1, 1]).
+        When provided the model clones the voice from this audio.
+        When *None* a default speaker prompt must be provided by the model itself;
+        most IndexTTS deployments require a prompt, so synthesis may fail without
+        reference audio.
+    reference_sample_rate : int
+        Sample rate of *reference_audio* (default: 16000 Hz).
+    verbose : bool
+        Print debug information.
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` on any failure.
+    """
+    global _indextts_model_cache
+
+    try:
+        if not INDEXTTS_AVAILABLE:
+            print("[IndexTTS][ERROR] indextts is not installed. "
+                  "Please install with: pip install indextts")
+            return False
+
+        model_name = voice_model if voice_model else _INDEXTTS_DEFAULT_MODEL
+
+        # Load / reuse cached engine
+        if model_name in _indextts_model_cache:
+            if verbose:
+                print(f"[IndexTTS] Reusing cached engine for model: {model_name}")
+            engine = _indextts_model_cache[model_name]
+        else:
+            if verbose:
+                print(f"[IndexTTS] Loading model: {model_name}")
+            engine = _load_indextts_engine(model_name, verbose=verbose)
+            if engine is None:
+                return False
+            _indextts_model_cache[model_name] = engine
+
+        # IndexTTS2.infer() requires a speaker prompt WAV file path.
+        # When reference_audio is provided we write it to a temp file; otherwise
+        # we cannot clone a voice and synthesis will fail.
+        if reference_audio is None:
+            print("[IndexTTS][ERROR] reference_audio is required for IndexTTS voice synthesis. "
+                  "Use --voice-match to supply a speaker prompt.")
+            return False
+
+        import io
+        import wave as _wave
+
+        ref_float = reference_audio.astype(np.float32)
+        if ref_float.max() > 1.0 or ref_float.min() < -1.0:
+            ref_float = ref_float / 32768.0
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as ref_fp:
+            ref_fp_path = ref_fp.name
+
+        try:
+            wav_buffer = io.BytesIO()
+            with _wave.open(wav_buffer, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(reference_sample_rate)
+                wf.writeframes(np.clip(ref_float * 32767, -32768, 32767).astype(np.int16).tobytes())
+            with open(ref_fp_path, "wb") as ref_out:
+                ref_out.write(wav_buffer.getvalue())
+
+            if verbose:
+                clone_info = " (with voice cloning)"
+                print(f"[IndexTTS] Synthesizing text{clone_info}...")
+
+            engine.infer(
+                spk_audio_prompt=ref_fp_path,
+                text=text,
+                output_path=output_wav,
+                verbose=verbose,
+            )
+        finally:
+            import builtins
+            if os.path.exists(ref_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                os.remove(ref_fp_path)
+
+        if verbose:
+            print(f"[IndexTTS] ✓ Synthesis successful, saved to {output_wav}")
+        return True
+
+    except Exception as exc:
+        print(f"[IndexTTS][ERROR] TTS exception: {exc}")
+        return False
+
+
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
@@ -774,9 +931,11 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     use_piper = voice_backend == "piper"
     use_custom = voice_backend == "custom"
     use_fish = voice_backend == "fish"
+    use_indextts = voice_backend == "indextts"
     piper_voice = voice_model
     custom_model = voice_model
     fish_model = voice_model
+    indextts_model = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
     if not translated_text:
@@ -833,6 +992,58 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if verbose:
                     print(f"[TTS] Fish synthesis failed: {fish_exc}")
                 use_fish = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
+        # IndexTTS backend (IndexTeam/IndexTTS-2)
+        if use_indextts:
+            if verbose:
+                print(f"[TTS] Using IndexTTS backend")
+
+            if not indextts_model or "/" not in indextts_model:
+                if verbose and indextts_model:
+                    print(f"[TTS] Replacing non-IndexTTS model '{indextts_model}' with default IndexTTS model")
+                indextts_model = _INDEXTTS_DEFAULT_MODEL
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                indextts_success = indextts_tts(
+                    translated_text,
+                    indextts_model,
+                    tts_fp_path,
+                    verbose=verbose,
+                )
+                if indextts_success:
+                    if verbose:
+                        print(f"[TTS] IndexTTS result: SUCCESS (model={indextts_model})")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if not audio_data.size:
+                        if verbose:
+                            print(f"[TTS] IndexTTS result: no data")
+                        use_indextts = False
+                    else:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                            if not audio_data.size:
+                                if verbose:
+                                    print(f"[TTS] librosa resample result: no data")
+                                use_indextts = False
+                        if use_indextts and audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] IndexTTS synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                else:
+                    if verbose:
+                        print(f"[TTS] IndexTTS failed, falling back to gTTS")
+                    use_indextts = False
+            except Exception as indextts_exc:
+                if verbose:
+                    print(f"[TTS] IndexTTS synthesis failed: {indextts_exc}")
+                use_indextts = False
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
@@ -979,7 +1190,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper and not use_custom and not use_fish:
+        if not use_piper and not use_custom and not use_fish and not use_indextts:
             if not _ensure_gtts_available(verbose=verbose):
                 return None
             tts_lang = lang_base
@@ -1060,15 +1271,16 @@ def synthesize_tts_pcm_with_cloning(
     reference_text : str or None
         Transcript of reference audio (improves voice cloning quality for custom backend)
     voice_backend : str
-        TTS backend to use: ``"piper"``, ``"gtts"``, ``"custom"``, or ``"fish"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"gtts"``, ``"custom"``, ``"fish"``, or ``"indextts"`` (default: ``"gtts"``)
     voice_model : str or None
         Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``,
-        the Qwen3-TTS model when ``voice_backend`` is ``"custom"``, or the fish-speech model
-        when ``voice_backend`` is ``"fish"``)
+        the Qwen3-TTS model when ``voice_backend`` is ``"custom"``, the fish-speech model
+        when ``voice_backend`` is ``"fish"``, or the IndexTTS model when ``voice_backend`` is ``"indextts"``)
     voice_match : bool
         Auto-select Piper voice based on input voice features (for piper backend),
         use voice cloning with reference audio (for custom backend),
-        or perform zero-shot voice cloning (for fish backend)
+        perform zero-shot voice cloning (for fish backend),
+        or clone speaker voice from reference audio (for indextts backend)
     verbose : bool
         Print debug information
     
@@ -1089,15 +1301,20 @@ def synthesize_tts_pcm_with_cloning(
 
     For fish backend with voice_match, zero-shot voice cloning is performed
     using the reference audio as the speaker prompt.
+
+    For indextts backend with voice_match, voice cloning is performed using
+    the reference audio as the speaker prompt.
     """ 
   
     
     use_piper = voice_backend == "piper"
     use_custom = voice_backend == "custom"
     use_fish = voice_backend == "fish"
+    use_indextts = voice_backend == "indextts"
     piper_voice = voice_model
     custom_model = voice_model
     fish_model = voice_model
+    indextts_model = voice_model
 
     if not translated_text:
         return None
@@ -1157,6 +1374,60 @@ def synthesize_tts_pcm_with_cloning(
                     print(f"[TTS] Fish voice cloning failed: {fish_exc}")
                     print("==========================================")
                 use_fish = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
+        # IndexTTS backend with voice matching uses voice cloning with reference audio
+        if use_indextts and voice_match and reference_audio is not None:
+            if verbose:
+                print("==========================================")
+                print("INDEXTTS VOICE CLONING (--voice-match)")
+                print("==========================================")
+                print(f"Using reference audio for voice cloning with IndexTTS")
+
+            if not indextts_model or "/" not in indextts_model:
+                if verbose and indextts_model:
+                    print(f"[TTS] Replacing non-IndexTTS model '{indextts_model}' with default IndexTTS model")
+                indextts_model = _INDEXTTS_DEFAULT_MODEL
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                indextts_success = indextts_tts(
+                    translated_text,
+                    indextts_model,
+                    tts_fp_path,
+                    reference_audio=reference_audio,
+                    reference_sample_rate=reference_sample_rate,
+                    verbose=verbose,
+                )
+
+                if indextts_success:
+                    if verbose:
+                        print(f"[TTS] IndexTTS voice cloning result: SUCCESS")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] IndexTTS voice cloning complete: {len(tts_pcm)} samples")
+                                print("==========================================")
+                            return tts_pcm
+
+                if verbose:
+                    print(f"[TTS] IndexTTS voice cloning failed, falling back to standard synthesis")
+                    print("==========================================")
+                use_indextts = False
+
+            except Exception as indextts_exc:
+                if verbose:
+                    print(f"[TTS] IndexTTS voice cloning failed: {indextts_exc}")
+                    print("==========================================")
+                use_indextts = False
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
@@ -1316,8 +1587,11 @@ def synthesize_tts_pcm_with_cloning(
                         print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
                     piper_voice = lang_voice
 
-        # Standard TTS synthesis (Fish, Piper, Custom, or gTTS)
-        if use_fish:
+        # Standard TTS synthesis (IndexTTS, Fish, Piper, Custom, or gTTS)
+        if use_indextts:
+            backend = "indextts"
+            model = indextts_model if (indextts_model and "/" in indextts_model) else _INDEXTTS_DEFAULT_MODEL
+        elif use_fish:
             backend = "fish"
             model = fish_model if (fish_model and "/" in fish_model) else "fishaudio/openaudio-s1-mini"
         elif use_custom:
