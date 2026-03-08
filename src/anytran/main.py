@@ -162,7 +162,7 @@ Examples:
     
     # Voice (TTS) options
     voice_group = parser.add_argument_group("voice options (text-to-speech / Stage 3)")
-    voice_group.add_argument("--voice-backend", type=str, default="auto", choices=["piper", "gtts", "custom", "auto"], help="TTS backend. 'auto' (default) prefers Piper if available and falls back to gTTS otherwise. Use 'piper' to force Piper TTS, 'gtts' to force Google TTS, or 'custom' to use Qwen3-TTS CustomVoice/Base models.")
+    voice_group.add_argument("--voice-backend", type=str, default="auto", choices=["piper", "gtts", "cosyvoice", "custom", "auto"], help="TTS backend. 'auto' (default) prefers Piper if available and falls back to gTTS otherwise. Use 'piper' to force Piper TTS, 'gtts' to force Google TTS, 'cosyvoice' to use CosyVoice TTS, or 'custom' to use Qwen3-TTS CustomVoice/Base models.")
     voice_group.add_argument("--voice-model", type=str, default="en_US-lessac-medium", help="Voice model name for TTS (default: en_US-lessac-medium). Used as the Piper voice model when --voice-backend piper is selected.")
     voice_group.add_argument("--voice-lang", type=str, help="Override TTS language")
     voice_group.add_argument("--voice-match", action="store_true", help="Auto-select Piper voice based on input voice characteristics")
@@ -513,18 +513,35 @@ def _validate_pipeline_args(args, parser):
         print("Warning: --scribe-vad specified but Silero VAD not installed. Install with: pip install silero-vad")
         print("Falling back to magnitude threshold for speech detection.")
     
+    # Voice backend availability checks
+    def _fallback_to_gtts(backend_name, reason):
+        """Helper to handle fallback to gTTS with consistent messaging."""
+        print(f"Warning: --voice-backend {backend_name} specified but {reason}")
+        print("Falling back to gTTS.")
+        args.voice_backend = "gtts"
+    
     # Piper check
     if args.voice_backend == "piper":
         try:
             result = subprocess.run(["piper", "--help"], capture_output=True, timeout=2)
             if result.returncode != 0:
-                print("Warning: --voice-backend piper specified but Piper not found.")
-                print("Falling back to gTTS.")
-                args.voice_backend = "gtts"
+                _fallback_to_gtts("piper", "Piper not found.")
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            print("Warning: --voice-backend piper specified but Piper not found.")
-            print("Falling back to gTTS.")
-            args.voice_backend = "gtts"
+            _fallback_to_gtts("piper", "Piper not found.")
+    
+    # CosyVoice check
+    elif args.voice_backend == "cosyvoice":
+        try:
+           from cosyvoice.cli.cosyvoice import AutoModel as CosyVoice
+        except ImportError:            
+            _fallback_to_gtts("cosyvoice", "CosyVoice not installed. Install with: pip install -e .[cosyvoice]")
+
+    # Custom (Qwen3-TTS) check
+    elif args.voice_backend == "custom":
+        try:
+            from qwen_tts import Qwen3TTSModel
+        except ImportError:
+            _fallback_to_gtts("custom", "qwen-tts is not installed. Install with: pip install -e .[custom]")
 
 
 def _configure_backends(args):

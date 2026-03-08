@@ -237,7 +237,7 @@ def test_same_language_voice_cloning_with_ref_text(mock_translate_audio, mock_tr
 
 
 if __name__ == "__main__":
-    test_cross_language_voice_cloning_no_ref_text()
+    test_cross_language_voice_cloning_translates_ref_text()
     print("✅ Test 1 passed: Cross-language voice cloning doesn't pass reference_text")
     
     test_same_language_voice_cloning_with_ref_text()
