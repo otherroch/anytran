@@ -30,8 +30,10 @@ try:
     from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
     from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
     FISH_TTS_AVAILABLE = True
-except ImportError:
+except Exception:
     _FishTTSInferenceEngine = None
+    _fish_load_decoder_model = None
+    _fish_launch_llama_queue = None
     _FishServeReferenceAudio = None
     _FishServeTTSRequest = None
     FISH_TTS_AVAILABLE = False

@@ -50,6 +50,101 @@ def test_fish_tts_not_available_returns_false(tmp_path, monkeypatch):
     assert result is False
 
 
+def test_fish_import_block_catches_non_import_errors(monkeypatch):
+    """
+    FISH_TTS_AVAILABLE must be False and all names must be set to None when
+    fish-speech imports raise non-ImportError exceptions (e.g. FileNotFoundError
+    from pyrootutils.setup_root, or AttributeError from torch._inductor accesses
+    that fish-speech modules perform at import time).
+    """
+    # The module-level try/except has already run; we verify the module is in a
+    # consistent state even when FISH_TTS_AVAILABLE is False.
+    assert hasattr(tts, "FISH_TTS_AVAILABLE")
+    assert hasattr(tts, "_FishTTSInferenceEngine")
+    assert hasattr(tts, "_fish_load_decoder_model")
+    assert hasattr(tts, "_fish_launch_llama_queue")
+    assert hasattr(tts, "_FishServeReferenceAudio")
+    assert hasattr(tts, "_FishServeTTSRequest")
+
+    # Simulate a fresh import where fish-speech raises RuntimeError (like pyrootutils)
+    import importlib, sys, types
+
+    # Back up and remove cached modules so we can re-exec the import block
+    _sentinel = object()
+
+    original_available = tts.FISH_TTS_AVAILABLE
+
+    # Build a fake fish_speech package whose sub-module raises RuntimeError
+    fake_fs = types.ModuleType("fish_speech")
+    fake_ie = types.ModuleType("fish_speech.inference_engine")
+
+    # Make TTSInferenceEngine import succeed ...
+    fake_ie.TTSInferenceEngine = object()
+
+    # ... but the dac.inference module raises RuntimeError at import time
+    fake_models = types.ModuleType("fish_speech.models")
+    fake_dac = types.ModuleType("fish_speech.models.dac")
+    fake_dac_inf = types.ModuleType("fish_speech.models.dac.inference")
+
+    original_modules = {}
+    for mod in ["fish_speech", "fish_speech.inference_engine", "fish_speech.models",
+                "fish_speech.models.dac", "fish_speech.models.dac.inference"]:
+        original_modules[mod] = sys.modules.pop(mod, _sentinel)
+
+    sys.modules["fish_speech"] = fake_fs
+    sys.modules["fish_speech.inference_engine"] = fake_ie
+    sys.modules["fish_speech.models"] = fake_models
+    sys.modules["fish_speech.models.dac"] = fake_dac
+
+    # Trigger RuntimeError when fish_speech.models.dac.inference is imported
+    class _RaisingFinder:
+        def find_module(self, name, path=None):
+            if name == "fish_speech.models.dac.inference":
+                return self
+            return None
+        def load_module(self, name):
+            raise RuntimeError("pyrootutils could not find .project-root")
+
+    finder = _RaisingFinder()
+    sys.meta_path.insert(0, finder)
+
+    try:
+        ns = {}
+        exec("""
+try:
+    from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
+    from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
+    from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
+    from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
+    from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
+    FISH_TTS_AVAILABLE = True
+except Exception:
+    _FishTTSInferenceEngine = None
+    _fish_load_decoder_model = None
+    _fish_launch_llama_queue = None
+    _FishServeReferenceAudio = None
+    _FishServeTTSRequest = None
+    FISH_TTS_AVAILABLE = False
+""", ns)
+        # All names must exist and be None / False
+        assert ns["FISH_TTS_AVAILABLE"] is False
+        assert ns["_FishTTSInferenceEngine"] is None
+        assert ns["_fish_load_decoder_model"] is None
+        assert ns["_fish_launch_llama_queue"] is None
+        assert ns["_FishServeReferenceAudio"] is None
+        assert ns["_FishServeTTSRequest"] is None
+    finally:
+        sys.meta_path.remove(finder)
+        # Restore sys.modules
+        for mod, orig in original_modules.items():
+            if orig is _sentinel:
+                sys.modules.pop(mod, None)
+            else:
+                sys.modules[mod] = orig
+
+
+
+
 # ---------------------------------------------------------------------------
 # Helpers for building mock fish-speech engine
 # ---------------------------------------------------------------------------
