@@ -485,9 +485,24 @@ def _load_fish_engine(model_name, verbose=False):
             return None
 
         if not hasattr(_torchaudio, "list_audio_backends"):
-            print("[FishTTS][ERROR] torchaudio is too old (missing list_audio_backends). "
-                  "Please upgrade to torchaudio >= 0.12: pip install --upgrade torchaudio")
-            return None
+            # list_audio_backends was removed in torchaudio 2.x nightlies and was
+            # absent in very old releases.  fish-speech's ReferenceLoader calls it
+            # in __init__ only to choose between "ffmpeg" and "soundfile" backends.
+            # Patch a shim onto the module so the engine can always be constructed.
+            import importlib.util as _ilu
+
+            def _list_audio_backends_shim():
+                backends = []
+                if _ilu.find_spec("soundfile") is not None:
+                    backends.append("soundfile")
+                try:
+                    import torchaudio.backend.ffmpeg_backend as _ffb  # noqa: F401
+                    backends.append("ffmpeg")
+                except ImportError:
+                    pass
+                return backends
+
+            _torchaudio.list_audio_backends = _list_audio_backends_shim
 
         from huggingface_hub import snapshot_download
 

@@ -338,15 +338,18 @@ def test_load_fish_engine_missing_torchaudio_returns_none(tmp_path, monkeypatch,
             sys.modules["torch"] = _orig_torch
 
 
-def test_load_fish_engine_old_torchaudio_missing_list_audio_backends(monkeypatch, capsys):
+def test_load_fish_engine_missing_list_audio_backends(tmp_path, monkeypatch, capsys):
     """
-    _load_fish_engine returns None with a helpful upgrade hint when torchaudio
-    is installed but too old to have list_audio_backends() (< 0.12).
-    This is the exact error reported by users:
-      AttributeError: module 'torchaudio' has no attribute 'list_audio_backends'
+    When torchaudio does NOT have list_audio_backends() — whether because it's an
+    old release (< 0.12) or a new nightly that removed the API — _load_fish_engine
+    patches a shim onto the module so that the fish-speech ReferenceLoader can still
+    construct itself.  The engine must be returned successfully (not None) when all
+    other dependencies are satisfied.
     """
     import sys
     import types
+
+    FakeRefAudio, FakeTTSRequest = _make_mock_fish_schema()
 
     # Stub a torchaudio that is importable but does NOT have list_audio_backends
     fake_old_torchaudio = types.ModuleType("torchaudio")
@@ -357,22 +360,51 @@ def test_load_fish_engine_old_torchaudio_missing_list_audio_backends(monkeypatch
 
     # Minimal torch stub
     fake_torch = types.ModuleType("torch")
+    fake_cuda = types.SimpleNamespace(is_available=lambda: False)
+    fake_mps = types.SimpleNamespace(is_available=lambda: False)
+    fake_backends = types.SimpleNamespace(mps=fake_mps)
+    fake_torch.cuda = fake_cuda
+    fake_torch.backends = fake_backends
+    fake_torch.bfloat16 = "bfloat16"
     _orig_torch = sys.modules.get("torch")
     sys.modules["torch"] = fake_torch
+
+    # Stub out huggingface_hub snapshot_download
+    fake_checkpoint = tmp_path / "model"
+    fake_checkpoint.mkdir()
+    (fake_checkpoint / "codec.pth").touch()
+
+    fake_hf = types.ModuleType("huggingface_hub")
+    fake_hf.snapshot_download = lambda *a, **kw: str(fake_checkpoint)
+    _orig_hf = sys.modules.get("huggingface_hub")
+    sys.modules["huggingface_hub"] = fake_hf
+
+    mock_engine = _make_mock_engine()
 
     try:
         monkeypatch.setattr(tts, "FISH_TTS_AVAILABLE", True)
         monkeypatch.setattr(tts, "TORCH_AVAILABLE", True)
         monkeypatch.setattr(tts, "torch", fake_torch)
         monkeypatch.setattr(tts, "_fish_model_cache", {})
+        monkeypatch.setattr(tts, "_FishServeReferenceAudio", FakeRefAudio)
+        monkeypatch.setattr(tts, "_FishServeTTSRequest", FakeTTSRequest)
+        monkeypatch.setattr(tts, "_fish_launch_llama_queue", lambda **kw: object())
+        monkeypatch.setattr(tts, "_fish_load_decoder_model", lambda **kw: object())
+        monkeypatch.setattr(tts, "_FishTTSInferenceEngine", lambda **kw: mock_engine)
 
         result = tts._load_fish_engine("fishaudio/openaudio-s1-mini", verbose=False)
-        assert result is None
 
+        # The shim must have been patched onto the module
+        assert hasattr(fake_old_torchaudio, "list_audio_backends"), (
+            "list_audio_backends shim was not applied to torchaudio"
+        )
+        # And the engine must be returned, not None
+        assert result is mock_engine, "Expected engine to be returned, got None"
+
+        # No error message should appear
         captured = capsys.readouterr()
-        assert "torchaudio" in captured.out
-        assert "upgrade" in captured.out.lower() or "too old" in captured.out.lower()
-        assert "pip install" in captured.out
+        assert "too old" not in captured.out
+        assert "upgrade" not in captured.out.lower()
     finally:
         if _orig_ta is None:
             sys.modules.pop("torchaudio", None)
@@ -382,6 +414,10 @@ def test_load_fish_engine_old_torchaudio_missing_list_audio_backends(monkeypatch
             sys.modules.pop("torch", None)
         else:
             sys.modules["torch"] = _orig_torch
+        if _orig_hf is None:
+            sys.modules.pop("huggingface_hub", None)
+        else:
+            sys.modules["huggingface_hub"] = _orig_hf
 
 
 def test_load_fish_engine_prints_full_traceback_on_failure(tmp_path, monkeypatch, capsys):
