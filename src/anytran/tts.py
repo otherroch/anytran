@@ -432,7 +432,7 @@ def custom_tts(text, voice_model, output_lang, output_wav, reference_audio=None,
         return False
 
 
-def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbose=False):
+def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, reference_text=None, verbose=False):
     """
     Generate speech using CosyVoice TTS.
     
@@ -446,6 +446,8 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
         Output WAV file path
     reference_audio_path : str or None
         Path to reference audio for voice cloning
+    reference_text : str or None
+        Text corresponding to the reference audio for voice cloning
     verbose : bool
         Print debug information
         
@@ -508,7 +510,7 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
             if verbose:
                 print(f"[CosyVoice] Using reference audio: {reference_audio_path}")
             # CosyVoice inference with reference audio (zero-shot cloning)
-            output = model.inference_zero_shot(text, prompt_wav=reference_audio_path)
+            output = model.inference_zero_shot(text, prompt_wav=reference_audio_path, prompt_text=reference_text)
         else:
             # Standard TTS inference
             if verbose:
@@ -1020,6 +1022,7 @@ def synthesize_tts_pcm_with_cloning(
                     cosyvoice_model, 
                     tts_fp_path, 
                     reference_audio_path=ref_audio_path,
+                    reference_text=reference_text,
                     verbose=verbose
                 )
                 if cosyvoice_success:
