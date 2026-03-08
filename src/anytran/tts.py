@@ -517,6 +517,9 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, refer
                 print(f"[CosyVoice] Using standard TTS (no reference audio)")
             output = model.inference_sft(text, spk_id=0)
         
+        if verbose:
+            print(f"[CosyVoice] Synthesis completed, processing output")    
+            
         # Save to WAV file
         # CosyVoice output is a dictionary with 'tts_speech' key containing audio data
         if isinstance(output, dict) and 'tts_speech' in output:
