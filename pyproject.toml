@@ -32,7 +32,9 @@ vad = ["silero-vad"]
 piper = ["piper-tts"]
 custom = ["qwen-tts", "torch", "transformers"]
 fish = ["fish-speech", "torch", "huggingface_hub"]
-indextts = ["indextts", "torch", "huggingface_hub"]
+# IndexTTS is not published on PyPI; install from GitHub:
+#   pip install git+https://github.com/index-tts/index-tts.git
+indextts = ["indextts @ git+https://github.com/index-tts/index-tts.git", "torch", "huggingface_hub"]
 # For CUDA support: install pywhispercpp separately FIRST with editable flag
 # GGML_CUDA=1 pip install -e git+https://github.com/absadiki/pywhispercpp#egg=pywhispercpp
 # Then: pip install -e .[whispercpp]
