@@ -518,12 +518,17 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, refer
             output = model.inference_sft(text, spk_id=0)
         
         # Save to WAV file
-        # CosyVoice output is typically a tensor or numpy array
-        if hasattr(output, 'cpu'):
-            # Convert torch tensor to numpy
-            audio_data = output.cpu().numpy()
+        # CosyVoice output is a dictionary with 'tts_speech' key containing audio data
+        if isinstance(output, dict) and 'tts_speech' in output:
+            audio_data = output['tts_speech']
         else:
-            audio_data = np.array(output)
+            audio_data = output
+        
+        # Convert torch tensor to numpy if needed
+        if hasattr(audio_data, 'cpu'):
+            audio_data = audio_data.cpu().numpy()
+        elif not isinstance(audio_data, np.ndarray):
+            audio_data = np.array(audio_data)
         
         # Ensure audio is in correct shape (flatten if needed)
         if len(audio_data.shape) > 1:
