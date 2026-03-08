@@ -11,7 +11,7 @@ except ImportError:
 
 # CosyVoice import detection
 try:
-    from cosyvoice.cli.cosyvoice import CosyVoice
+    from cosyvoice.cli.cosyvoice import AutoModel as CosyVoice
     COSYVOICE_AVAILABLE = True
 except ImportError:
     CosyVoice = None
@@ -475,7 +475,7 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
             
             # Try to load from local path first, then from HuggingFace
             if os.path.isdir(model_name):
-                model = CosyVoice(model_name)
+                model = CosyVoice(model_dir=model_name)
             else:
                 # Load from HuggingFace or ModelScope
                 try:
@@ -485,12 +485,12 @@ def cosyvoice_tts(text, model_name, output_wav, reference_audio_path=None, verbo
                         if verbose:
                             print(f"[CosyVoice] Downloading model to {local_dir}")
                         snapshot_download(model_name, local_dir=local_dir)
-                    model = CosyVoice(local_dir)
+                    model = CosyVoice(model_dir=local_dir)
                 except ImportError:
                     # Fall back to loading directly if modelscope not available
                     if verbose:
                         print(f"[CosyVoice] ModelScope not available, trying direct load")
-                    model = CosyVoice(model_name)
+                    model = CosyVoice(model_dir=model_name)
                     
             _cosyvoice_model_cache[model_name] = model
             if verbose:

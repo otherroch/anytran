@@ -532,10 +532,10 @@ def _validate_pipeline_args(args, parser):
     # CosyVoice check
     elif args.voice_backend == "cosyvoice":
         try:
-            from cosyvoice.cli.cosyvoice import CosyVoice
-        except ImportError:
+           from cosyvoice.cli.cosyvoice import AutoModel as CosyVoice
+        except ImportError:            
             _fallback_to_gtts("cosyvoice", "CosyVoice not installed. Install with: pip install -e .[cosyvoice]")
-    
+
     # Custom (Qwen3-TTS) check
     elif args.voice_backend == "custom":
         try:
