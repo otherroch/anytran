@@ -25,10 +25,22 @@ except ImportError:
 
 try:
     from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
-    from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
     from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
     from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
     from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
+    # fish_speech/models/dac/inference.py calls pyrootutils.setup_root() at module
+    # level to find the source-tree root.  When fish-speech is pip-installed the
+    # .project-root marker file is absent and the call raises FileNotFoundError.
+    # pip already placed everything on sys.path, so temporarily replace setup_root
+    # with a no-op to let the import succeed, then restore the original.
+    import pyrootutils as _pyrootutils
+    _pyrootutils_orig = _pyrootutils.setup_root
+    _pyrootutils.setup_root = lambda *a, **kw: None
+    try:
+        from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
+    finally:
+        _pyrootutils.setup_root = _pyrootutils_orig
+    del _pyrootutils, _pyrootutils_orig
     FISH_TTS_AVAILABLE = True
 except Exception:
     _FishTTSInferenceEngine = None

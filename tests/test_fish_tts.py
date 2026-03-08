@@ -113,10 +113,17 @@ def test_fish_import_block_catches_non_import_errors(monkeypatch):
         exec("""
 try:
     from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
-    from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
     from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
     from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
     from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
+    import pyrootutils as _pyrootutils
+    _pyrootutils_orig = _pyrootutils.setup_root
+    _pyrootutils.setup_root = lambda *a, **kw: None
+    try:
+        from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
+    finally:
+        _pyrootutils.setup_root = _pyrootutils_orig
+    del _pyrootutils, _pyrootutils_orig
     FISH_TTS_AVAILABLE = True
 except Exception:
     _FishTTSInferenceEngine = None
@@ -136,6 +143,138 @@ except Exception:
     finally:
         sys.meta_path.remove(finder)
         # Restore sys.modules
+        for mod, orig in original_modules.items():
+            if orig is _sentinel:
+                sys.modules.pop(mod, None)
+            else:
+                sys.modules[mod] = orig
+
+
+def test_fish_import_block_pyrootutils_patch_makes_dac_inference_succeed():
+    """
+    The import block patches pyrootutils.setup_root to a no-op before importing
+    fish_speech.models.dac.inference so that the FileNotFoundError raised by a
+    pip-installed fish-speech package (no .project-root marker file) does not
+    prevent the import from succeeding.  FISH_TTS_AVAILABLE must be True and
+    _fish_load_decoder_model must be the real load_model function.
+    """
+    import importlib.util
+    import sys
+    import types
+
+    _sentinel = object()
+
+    # Fake pyrootutils whose setup_root raises FileNotFoundError by default,
+    # simulating a pip-installed fish-speech package without .project-root.
+    fake_pyrootutils = types.ModuleType("pyrootutils")
+    def _raising_setup_root(*a, **kw):
+        raise FileNotFoundError(
+            "Project root directory not found. Indicators: ['.project-root']"
+        )
+    fake_pyrootutils.setup_root = _raising_setup_root
+
+    # A finder that creates fish_speech.models.dac.inference on the fly.
+    # It mimics what the real module does: call pyrootutils.setup_root() at
+    # import time.  If the import block has patched it to a no-op the load
+    # succeeds; otherwise FileNotFoundError propagates.
+    class _DacInferenceFinder:
+        def find_spec(self, fullname, path, target=None):
+            if fullname == "fish_speech.models.dac.inference":
+                return importlib.util.spec_from_loader(fullname, self)
+            return None
+
+        def create_module(self, spec):
+            return None  # use default module creation
+
+        def exec_module(self, module):
+            import pyrootutils  # resolved via sys.modules → fake_pyrootutils
+            pyrootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+            module.load_model = lambda *a, **kw: None
+
+    finder = _DacInferenceFinder()
+
+    # Build the rest of the fake fish_speech package (all successful).
+    # Intermediate packages need __path__ so Python treats them as packages.
+    fake_fs = types.ModuleType("fish_speech")
+    fake_fs.__path__ = []
+    fake_ie = types.ModuleType("fish_speech.inference_engine")
+    fake_ie.TTSInferenceEngine = type("TTSInferenceEngine", (), {})
+    fake_models = types.ModuleType("fish_speech.models")
+    fake_models.__path__ = []
+    fake_dac = types.ModuleType("fish_speech.models.dac")
+    fake_dac.__path__ = []
+    fake_t2s = types.ModuleType("fish_speech.models.text2semantic")
+    fake_t2s.__path__ = []
+    fake_t2s_inf = types.ModuleType("fish_speech.models.text2semantic.inference")
+    fake_t2s_inf.launch_thread_safe_queue = lambda *a, **kw: None
+    fake_utils = types.ModuleType("fish_speech.utils")
+    fake_utils.__path__ = []
+    fake_schema = types.ModuleType("fish_speech.utils.schema")
+    fake_schema.ServeReferenceAudio = type("ServeReferenceAudio", (), {})
+    fake_schema.ServeTTSRequest = type("ServeTTSRequest", (), {})
+
+    mods_to_swap = [
+        "pyrootutils",
+        "fish_speech", "fish_speech.inference_engine",
+        "fish_speech.models", "fish_speech.models.dac",
+        "fish_speech.models.dac.inference",
+        "fish_speech.models.text2semantic",
+        "fish_speech.models.text2semantic.inference",
+        "fish_speech.utils", "fish_speech.utils.schema",
+    ]
+    original_modules = {m: sys.modules.pop(m, _sentinel) for m in mods_to_swap}
+
+    sys.modules.update({
+        "pyrootutils": fake_pyrootutils,
+        "fish_speech": fake_fs,
+        "fish_speech.inference_engine": fake_ie,
+        "fish_speech.models": fake_models,
+        "fish_speech.models.dac": fake_dac,
+        "fish_speech.models.text2semantic": fake_t2s,
+        "fish_speech.models.text2semantic.inference": fake_t2s_inf,
+        "fish_speech.utils": fake_utils,
+        "fish_speech.utils.schema": fake_schema,
+    })
+    sys.meta_path.insert(0, finder)
+
+    try:
+        ns = {}
+        exec("""
+try:
+    from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
+    from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
+    from fish_speech.utils.schema import ServeReferenceAudio as _FishServeReferenceAudio
+    from fish_speech.utils.schema import ServeTTSRequest as _FishServeTTSRequest
+    import pyrootutils as _pyrootutils
+    _pyrootutils_orig = _pyrootutils.setup_root
+    _pyrootutils.setup_root = lambda *a, **kw: None
+    try:
+        from fish_speech.models.dac.inference import load_model as _fish_load_decoder_model
+    finally:
+        _pyrootutils.setup_root = _pyrootutils_orig
+    del _pyrootutils, _pyrootutils_orig
+    FISH_TTS_AVAILABLE = True
+except Exception:
+    _FishTTSInferenceEngine = None
+    _fish_load_decoder_model = None
+    _fish_launch_llama_queue = None
+    _FishServeReferenceAudio = None
+    _FishServeTTSRequest = None
+    FISH_TTS_AVAILABLE = False
+""", ns)
+        # The patch must have allowed dac.inference to load successfully.
+        assert ns["FISH_TTS_AVAILABLE"] is True, (
+            "FISH_TTS_AVAILABLE should be True when pyrootutils.setup_root is patched"
+        )
+        assert ns["_fish_load_decoder_model"] is not None
+        assert ns["_FishTTSInferenceEngine"] is not None
+        assert ns["_fish_launch_llama_queue"] is not None
+        assert ns["_FishServeReferenceAudio"] is not None
+        assert ns["_FishServeTTSRequest"] is not None
+        # setup_root must have been restored to the raising version after import
+        assert fake_pyrootutils.setup_root is _raising_setup_root
+    finally:
+        sys.meta_path.remove(finder)
         for mod, orig in original_modules.items():
             if orig is _sentinel:
                 sys.modules.pop(mod, None)
