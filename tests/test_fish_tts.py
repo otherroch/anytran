@@ -283,10 +283,136 @@ except Exception:
 
 
 
+# ---------------------------------------------------------------------------
+# _load_fish_engine – torchaudio availability check
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Helpers for building mock fish-speech engine
-# ---------------------------------------------------------------------------
+def test_load_fish_engine_missing_torchaudio_returns_none(tmp_path, monkeypatch, capsys):
+    """
+    _load_fish_engine returns None and prints a helpful install hint when
+    torchaudio is not importable.  The torchaudio check runs before any
+    network I/O (huggingface_hub download), so no mocking of HF hub is needed.
+    """
+    import sys
+    import types
+
+    _sentinel = object()
+    original_torchaudio = sys.modules.pop("torchaudio", _sentinel)
+
+    # Finder that makes 'import torchaudio' raise ImportError
+    class _BrokenTorchaudioFinder:
+        def find_spec(self, fullname, path, target=None):
+            if fullname == "torchaudio":
+                raise ImportError("No module named 'torchaudio'")
+            return None
+
+    finder = _BrokenTorchaudioFinder()
+    sys.meta_path.insert(0, finder)
+
+    # Provide a minimal torch stub so TORCH_AVAILABLE check passes
+    fake_torch = types.ModuleType("torch")
+    _orig_torch = sys.modules.get("torch")
+    sys.modules["torch"] = fake_torch
+
+    try:
+        monkeypatch.setattr(tts, "FISH_TTS_AVAILABLE", True)
+        monkeypatch.setattr(tts, "TORCH_AVAILABLE", True)
+        monkeypatch.setattr(tts, "torch", fake_torch)
+        monkeypatch.setattr(tts, "_fish_model_cache", {})
+
+        result = tts._load_fish_engine("fishaudio/openaudio-s1-mini", verbose=False)
+        assert result is None
+
+        captured = capsys.readouterr()
+        assert "torchaudio" in captured.out
+        assert "pip install" in captured.out
+    finally:
+        sys.meta_path.remove(finder)
+        if original_torchaudio is _sentinel:
+            sys.modules.pop("torchaudio", None)
+        else:
+            sys.modules["torchaudio"] = original_torchaudio
+        if _orig_torch is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = _orig_torch
+
+
+def test_load_fish_engine_prints_full_traceback_on_failure(tmp_path, monkeypatch, capsys):
+    """
+    When _fish_load_decoder_model raises an unexpected exception,
+    _load_fish_engine prints both the short summary line (stdout) and the full
+    traceback (stderr) so users can diagnose environment problems such as a
+    PyTorch version that is too old for the mmap=True parameter.
+    """
+    import sys
+    import types
+
+    FakeRefAudio, FakeTTSRequest = _make_mock_fish_schema()
+
+    monkeypatch.setattr(tts, "FISH_TTS_AVAILABLE", True)
+    monkeypatch.setattr(tts, "TORCH_AVAILABLE", True)
+    monkeypatch.setattr(tts, "_fish_model_cache", {})
+    monkeypatch.setattr(tts, "_FishServeReferenceAudio", FakeRefAudio)
+    monkeypatch.setattr(tts, "_FishServeTTSRequest", FakeTTSRequest)
+
+    # Minimal torch stub with cuda / backends stubs
+    fake_torch = types.ModuleType("torch")
+    fake_cuda = types.SimpleNamespace(is_available=lambda: False)
+    fake_mps  = types.SimpleNamespace(is_available=lambda: False)
+    fake_backends = types.SimpleNamespace(mps=fake_mps)
+    fake_torch.cuda = fake_cuda
+    fake_torch.backends = fake_backends
+    fake_torch.bfloat16 = "bfloat16"
+    monkeypatch.setattr(tts, "torch", fake_torch)
+
+    # torchaudio must be importable (so we get past that check)
+    fake_torchaudio = types.ModuleType("torchaudio")
+    _orig_ta = sys.modules.get("torchaudio")
+    sys.modules["torchaudio"] = fake_torchaudio
+
+    # Stub out huggingface_hub snapshot_download
+    fake_checkpoint = tmp_path / "model"
+    fake_checkpoint.mkdir()
+    (fake_checkpoint / "codec.pth").touch()
+
+    fake_hf = types.ModuleType("huggingface_hub")
+    fake_hf.snapshot_download = lambda *a, **kw: str(fake_checkpoint)
+    _orig_hf = sys.modules.get("huggingface_hub")
+    sys.modules["huggingface_hub"] = fake_hf
+
+    # LLaMA queue loads fine; decoder raises a descriptive error
+    monkeypatch.setattr(tts, "_fish_launch_llama_queue", lambda **kw: object())
+
+    def _failing_load_model(**kw):
+        raise RuntimeError("mmap parameter requires PyTorch >= 2.1")
+
+    monkeypatch.setattr(tts, "_fish_load_decoder_model", _failing_load_model)
+
+    try:
+        result = tts._load_fish_engine("fishaudio/openaudio-s1-mini", verbose=False)
+    finally:
+        if _orig_hf is None:
+            sys.modules.pop("huggingface_hub", None)
+        else:
+            sys.modules["huggingface_hub"] = _orig_hf
+        if _orig_ta is None:
+            sys.modules.pop("torchaudio", None)
+        else:
+            sys.modules["torchaudio"] = _orig_ta
+
+    assert result is None
+
+    captured = capsys.readouterr()
+    # Short summary goes to stdout
+    assert "Failed to load engine" in captured.out
+    # Full traceback goes to stderr
+    assert "Traceback" in captured.err
+    assert "RuntimeError" in captured.err
+    assert "mmap parameter requires PyTorch" in captured.err
+
+
+
 
 def _make_mock_engine(sample_rate=44100, audio_length=44100):
     """Return a mock TTSInferenceEngine that yields a 1-second silence clip."""

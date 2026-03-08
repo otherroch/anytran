@@ -467,13 +467,24 @@ def _load_fish_engine(model_name, verbose=False):
 
     Returns the engine on success, or ``None`` on failure.
     """
+    import traceback as _traceback
+
     try:
         from pathlib import Path
-        from huggingface_hub import snapshot_download
 
         if not TORCH_AVAILABLE:
             print("[FishTTS][ERROR] torch is not installed. Please install with: pip install torch")
             return None
+
+        try:
+            import torchaudio as _torchaudio  # noqa: F401
+        except ImportError:
+            print("[FishTTS][ERROR] torchaudio is not installed. "
+                  "Please install a version matching your torch installation, e.g.: "
+                  "pip install torchaudio")
+            return None
+
+        from huggingface_hub import snapshot_download
 
         if verbose:
             print(f"[FishTTS] Downloading/locating checkpoint: {model_name}")
@@ -529,6 +540,7 @@ def _load_fish_engine(model_name, verbose=False):
 
     except Exception as exc:
         print(f"[FishTTS][ERROR] Failed to load engine: {exc}")
+        _traceback.print_exc()
         return None
 
 
