@@ -338,6 +338,52 @@ def test_load_fish_engine_missing_torchaudio_returns_none(tmp_path, monkeypatch,
             sys.modules["torch"] = _orig_torch
 
 
+def test_load_fish_engine_old_torchaudio_missing_list_audio_backends(monkeypatch, capsys):
+    """
+    _load_fish_engine returns None with a helpful upgrade hint when torchaudio
+    is installed but too old to have list_audio_backends() (< 0.12).
+    This is the exact error reported by users:
+      AttributeError: module 'torchaudio' has no attribute 'list_audio_backends'
+    """
+    import sys
+    import types
+
+    # Stub a torchaudio that is importable but does NOT have list_audio_backends
+    fake_old_torchaudio = types.ModuleType("torchaudio")
+    # deliberately omit list_audio_backends
+
+    _orig_ta = sys.modules.get("torchaudio")
+    sys.modules["torchaudio"] = fake_old_torchaudio
+
+    # Minimal torch stub
+    fake_torch = types.ModuleType("torch")
+    _orig_torch = sys.modules.get("torch")
+    sys.modules["torch"] = fake_torch
+
+    try:
+        monkeypatch.setattr(tts, "FISH_TTS_AVAILABLE", True)
+        monkeypatch.setattr(tts, "TORCH_AVAILABLE", True)
+        monkeypatch.setattr(tts, "torch", fake_torch)
+        monkeypatch.setattr(tts, "_fish_model_cache", {})
+
+        result = tts._load_fish_engine("fishaudio/openaudio-s1-mini", verbose=False)
+        assert result is None
+
+        captured = capsys.readouterr()
+        assert "torchaudio" in captured.out
+        assert "upgrade" in captured.out.lower() or "too old" in captured.out.lower()
+        assert "pip install" in captured.out
+    finally:
+        if _orig_ta is None:
+            sys.modules.pop("torchaudio", None)
+        else:
+            sys.modules["torchaudio"] = _orig_ta
+        if _orig_torch is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = _orig_torch
+
+
 def test_load_fish_engine_prints_full_traceback_on_failure(tmp_path, monkeypatch, capsys):
     """
     When _fish_load_decoder_model raises an unexpected exception,
@@ -368,6 +414,7 @@ def test_load_fish_engine_prints_full_traceback_on_failure(tmp_path, monkeypatch
 
     # torchaudio must be importable (so we get past that check)
     fake_torchaudio = types.ModuleType("torchaudio")
+    fake_torchaudio.list_audio_backends = lambda: ["soundfile"]  # satisfy version check
     _orig_ta = sys.modules.get("torchaudio")
     sys.modules["torchaudio"] = fake_torchaudio
 

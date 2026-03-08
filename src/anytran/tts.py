@@ -484,6 +484,11 @@ def _load_fish_engine(model_name, verbose=False):
                   "pip install torchaudio")
             return None
 
+        if not hasattr(_torchaudio, "list_audio_backends"):
+            print("[FishTTS][ERROR] torchaudio is too old (missing list_audio_backends). "
+                  "Please upgrade to torchaudio >= 0.12: pip install --upgrade torchaudio")
+            return None
+
         from huggingface_hub import snapshot_download
 
         if verbose:
