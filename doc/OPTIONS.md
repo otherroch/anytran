@@ -129,13 +129,7 @@ These options save or output the English transcription from Stage 1.
 - **When it runs**: Only if voice output is requested
 - **TTS engine**:
   - Default: auto (Piper if available, otherwise gTTS)
-  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts)
-- **Requires**: Voice synthesis to be available (see `--voice-backend` for requirements)
-- **Interactions**:
-  - Requires TTS engine available
-  - Can be combined with `--slate-voice`
-  - Uses `en_US` (English) for voice synthesis
-  - Respects `--voice-backend` and `--voice-model` settings
+  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts, coqui)
 
 ---
 
@@ -164,8 +158,7 @@ These options save or output the translated text (or re-output if `output-lang` 
   - If `output-lang` = `en`: Reads English text aloud
 - **TTS engine**:
   - Default: auto (Piper if available, otherwise gTTS)
-  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts)
-- **Language for TTS**:
+  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts, coqui)
   - Default: `output-lang` (or `en` if output-lang is `en`)
   - Can be overridden with `--voice-lang`
 - **Interactions**:
@@ -316,7 +309,7 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
 
 ### `--voice-backend <backend>`
 - **Type**: Choice
-- **Choices**: `auto`, `gtts`, `piper`, `custom`, `fish`, `indextts`
+- **Choices**: `auto`, `gtts`, `piper`, `custom`, `fish`, `indextts`, `coqui`
 - **Default**: `auto`
 - **Purpose**: Select the TTS engine for voice synthesis
 - **Options**:
@@ -326,6 +319,7 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
   - `custom`: Qwen3-TTS local AI model (CustomVoice or Base for voice cloning)
   - `fish`: fish-speech local neural TTS (supports voice cloning)
   - `indextts`: IndexTTS local neural TTS (supports voice cloning via speaker prompt)
+  - `coqui`: coqui-tts XTTS v2 local neural TTS (Python 3.12-compatible, 17 languages, supports zero-shot voice cloning)
 - **Benefits of `piper`**:
   - Faster (no network calls)
   - Private (no data sent to external services)
@@ -343,17 +337,23 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
   - High-quality voice cloning from a short speaker prompt
   - Runs fully locally
   - Works well with `--voice-match` to supply a speaker prompt automatically
+- **Benefits of `coqui`**:
+  - Python 3.12 fully supported (uses `coqui-tts`, the maintained fork of coqui-ai/TTS)
+  - XTTS v2: high-quality, multi-lingual neural TTS (17 languages)
+  - Zero-shot voice cloning with `--voice-match`
+  - CUDA auto-detected; falls back to CPU
 - **Requirements**:
   - `piper`: `pip install -e .[piper]`
   - `custom`: `pip install -e .[custom]`
   - `fish`: `pip install -e .[fish]`
   - `indextts`: `GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git && pip install 'anytran[index-tts]'`
+  - `coqui`: `pip install 'anytran[coqui]'`
 - **Fallback**: `auto` falls back to gTTS if Piper is not found; `piper` also falls back to gTTS if not installed
 - **Interactions**:
   - Works with `--scribe-voice` and `--slate-voice`
-  - `--voice-model`: Selects the model when using `piper`, `custom`, `fish`, or `indextts`
+  - `--voice-model`: Selects the model when using `piper`, `custom`, `fish`, `indextts`, or `coqui`
   - `--voice-lang`: May override voice language
-  - `--voice-match`: Can supply reference audio for voice cloning with `custom` (Base model), `fish`, and `indextts` backends; auto-selects voice for `piper`
+  - `--voice-match`: Can supply reference audio for voice cloning with `custom` (Base model), `fish`, `indextts`, and `coqui` backends; auto-selects voice for `piper`
   - See [TTS_BACKENDS.md](TTS_BACKENDS.md) for detailed per-backend guidance
 
 ### `--voice-model <voice-model>`
@@ -374,11 +374,14 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
     - `fishaudio/fish-speech-1.5`
   - `indextts`: IndexTTS HuggingFace model repo
     - `IndexTeam/IndexTTS-2` (default)
+  - `coqui`: coqui-tts model identifier
+    - `tts_models/multilingual/multi-dataset/xtts_v2` (default — XTTS v2, 17 languages)
 - **Finding Piper voices**: Check Piper documentation or available voice list
 - **Interactions**:
   - Ignored when `--voice-backend gtts` is selected
   - For `piper`: specifies the voice model
   - For `custom`, `fish`, `indextts`: specifies the HuggingFace model repo
+  - For `coqui`: specifies the coqui-tts model identifier (must start with `tts_models/`)
   - `--voice-lang`: Does not override voice, but should match voice language for Piper
 
 ### `--voice-lang <code>`
@@ -397,18 +400,18 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
 ### `--voice-match`
 - **Type**: Boolean flag
 - **Default**: Disabled
-- **Purpose**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics; also supplies a speaker prompt for `indextts` voice cloning
+- **Purpose**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics; also supplies a speaker prompt for `indextts` and `coqui` voice cloning
 - **How it works**:
   1. Extracts pitch and spectral features from input audio
   2. Estimates gender (Male: <140Hz, Female: >180Hz)
   3. Selects the closest matching Piper voice for the target language (when using `piper`)
-  4. Supplies a speaker reference audio prompt (when using `indextts`)
+  4. Supplies a speaker reference audio prompt (when using `indextts` or `coqui`)
   5. Falls back to default voice if no suitable match found
 - **Requirements**: `pip install -e .[piper]`; Piper TTS must be installed (when using `piper` backend)
 - **Interactions**:
   - Works with `--slate-voice` and Piper TTS
   - Pairs well with `--voice-backend piper`
-  - Provides reference audio for voice cloning with `--voice-backend custom` (Base model), `--voice-backend fish`, and `--voice-backend indextts`
+  - Provides reference audio for voice cloning with `--voice-backend custom` (Base model), `--voice-backend fish`, `--voice-backend indextts`, and `--voice-backend coqui`
   - See [VOICE_MATCHING.md](VOICE_MATCHING.md) for details
 
 ---

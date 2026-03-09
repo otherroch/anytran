@@ -8,6 +8,8 @@ The voice matching feature allows the output voice (slate-voice) to match the in
 
 1. **`--voice-match`**: Automatically selects the best matching Piper TTS voice based on the input speaker's characteristics (pitch, gender, etc.)
 
+For backends that support voice cloning (`custom`, `fish`, `indextts`, `coqui`), `--voice-match` additionally supplies a reference audio clip from the input stream to enable zero-shot voice cloning.
+
 ## Installation
 
 ### For Voice Matching
@@ -61,6 +63,30 @@ anytran --youtube-url "https://youtube.com/watch?v=..." \
 - French: siwis-medium (female), upmc-medium (male)
 - Spanish: mls_10246-low (female), carlfm-x_low (male)
 - German: eva_k-x_low (female), thorsten-high (male)
+
+### Voice Cloning with coqui (--voice-backend coqui --voice-match)
+
+When `--voice-match` is used with the `coqui` backend, anytran supplies a reference audio clip
+from the input stream to XTTS v2 for zero-shot voice cloning:
+
+```bash
+# Zero-shot voice cloning with coqui-tts XTTS v2
+anytran --input sample.wav --output-lang fr --slate-voice output.wav \
+  --voice-backend coqui --voice-match
+
+# Real-time RTSP with coqui voice cloning
+anytran --rtsp rtsp://camera-url \
+  --output-lang fr \
+  --slate-voice french.wav \
+  --voice-backend coqui \
+  --voice-match \
+  --verbose
+```
+
+**Supported languages for coqui XTTS v2:**
+`en`, `es`, `fr`, `de`, `it`, `pt`, `pl`, `tr`, `ru`, `nl`, `cs`, `ar`, `zh-cn`, `hu`, `ko`, `ja`, `hi`
+
+Install: `pip install "anytran[coqui]"`
 
 ## Combining with Other Features
 
