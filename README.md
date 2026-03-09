@@ -71,6 +71,7 @@ Additional topic guides:
 - [Installation](doc/INSTALLATION.md) — CUDA GPU support, individual feature installs, and Linux system prerequisites
 - [Text Translation Backends](doc/TEXT_TRANSLATION.md) — details on all translation backends (googletrans, libretranslate, MarianMT, MetaNLLB, TranslateGemma)
 - [TranslateGemma Setup](doc/TRANSLATEGEMMA_SETUP.md) — guide for using Google's local TranslateGemma AI model
+- [TTS Backends](doc/TTS_BACKENDS.md) — details on all voice synthesis backends (gtts, piper, custom/Qwen3-TTS, fish-speech, IndexTTS)
 - [Voice Matching](doc/VOICE_MATCHING.md) — auto-matching voice features
 - [Loop Translation (looptran)](doc/LOOPTRAN.md) — iterative back-translation with `--looptran` and `--tran-converge`
 

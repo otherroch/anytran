@@ -128,9 +128,9 @@ These options save or output the English transcription from Stage 1.
 - **Output format**: Audio file containing English transcription read aloud
 - **When it runs**: Only if voice output is requested
 - **TTS engine**:
-  - Default: gTTS (Google Text-to-Speech)
-  - Override with `--voice-backend piper` for local Piper TTS
-- **Requires**: Voice synthesis to be available (gTTS or Piper)
+  - Default: auto (Piper if available, otherwise gTTS)
+  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts)
+- **Requires**: Voice synthesis to be available (see `--voice-backend` for requirements)
 - **Interactions**:
   - Requires TTS engine available
   - Can be combined with `--slate-voice`
@@ -163,8 +163,8 @@ These options save or output the translated text (or re-output if `output-lang` 
   - If `output-lang` ≠ `en`: Reads **translated** text aloud in target language
   - If `output-lang` = `en`: Reads English text aloud
 - **TTS engine**:
-  - Default: gTTS
-  - Override with `--voice-backend piper` for local Piper TTS
+  - Default: auto (Piper if available, otherwise gTTS)
+  - Override with `--voice-backend` to select a specific engine (piper, gtts, custom, fish, indextts)
 - **Language for TTS**:
   - Default: `output-lang` (or `en` if output-lang is `en`)
   - Can be overridden with `--voice-lang`
@@ -316,38 +316,70 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
 
 ### `--voice-backend <backend>`
 - **Type**: Choice
-- **Choices**: `gtts`, `piper`
-- **Default**: `gtts`
+- **Choices**: `auto`, `gtts`, `piper`, `custom`, `fish`, `indextts`
+- **Default**: `auto`
 - **Purpose**: Select the TTS engine for voice synthesis
 - **Options**:
+  - `auto`: Prefers Piper if available, falls back to gTTS automatically
   - `gtts`: Google Text-to-Speech (network call, no installation needed)
   - `piper`: Local Piper TTS (fast, private, works offline)
+  - `custom`: Qwen3-TTS local AI model (CustomVoice or Base for voice cloning)
+  - `fish`: fish-speech local neural TTS (supports voice cloning)
+  - `indextts`: IndexTTS local neural TTS (supports voice cloning via speaker prompt)
 - **Benefits of `piper`**:
   - Faster (no network calls)
   - Private (no data sent to external services)
   - Works offline
   - Better voice quality for some languages
-- **Requirements**: For `piper` — Piper must be installed (`pip install piper-tts` or binary)
-- **Fallback**: Automatically falls back to gTTS if Piper not found
+- **Benefits of `custom` (Qwen3-TTS)**:
+  - High-quality multilingual neural TTS
+  - Supports voice cloning when using the Base model with `--voice-match`
+  - Runs fully locally on GPU or CPU
+- **Benefits of `fish`**:
+  - Neural TTS with natural-sounding output
+  - Supports zero-shot voice cloning with reference audio and transcript
+  - Runs fully locally
+- **Benefits of `indextts`**:
+  - High-quality voice cloning from a short speaker prompt
+  - Runs fully locally
+  - Works well with `--voice-match` to supply a speaker prompt automatically
+- **Requirements**:
+  - `piper`: `pip install -e .[piper]`
+  - `custom`: `pip install -e .[custom]`
+  - `fish`: `pip install -e .[fish]`
+  - `indextts`: `GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git && pip install 'anytran[index-tts]'`
+- **Fallback**: `auto` falls back to gTTS if Piper is not found; `piper` also falls back to gTTS if not installed
 - **Interactions**:
   - Works with `--scribe-voice` and `--slate-voice`
-  - `--voice-model`: Selects which voice model to use when `--voice-backend piper`
+  - `--voice-model`: Selects the model when using `piper`, `custom`, `fish`, or `indextts`
   - `--voice-lang`: May override voice language
+  - `--voice-match`: Can supply reference audio for voice cloning with `custom` (Base model), `fish`, and `indextts` backends; auto-selects voice for `piper`
+  - See [TTS_BACKENDS.md](TTS_BACKENDS.md) for detailed per-backend guidance
 
 ### `--voice-model <voice-model>`
-- **Type**: Voice model identifier
+- **Type**: Voice model identifier or HuggingFace repo
 - **Default**: `en_US-lessac-medium`
-- **Format**: `{language_code}-{speaker_name}-{quality}`
-- **Examples**:
-  - `en_US-lessac-medium`: English (US) - clear male voice
-  - `en_US-norman-medium`: English (US) - different speaker
-  - `en_GB-amy-medium`: English (British)
-  - `es_ES-carla-x-low`: Spanish
-  - `fr_FR-siwis-medium`: French
-- **Finding voices**: Check Piper documentation or available voice list
+- **Backend-specific values**:
+  - `piper`: Piper voice name in `{language_code}-{speaker_name}-{quality}` format
+    - `en_US-lessac-medium`: English (US) - clear male voice
+    - `en_US-norman-medium`: English (US) - different speaker
+    - `en_GB-amy-medium`: English (British)
+    - `es_ES-carla-x-low`: Spanish
+    - `fr_FR-siwis-medium`: French
+  - `custom`: Qwen3-TTS HuggingFace model repo
+    - `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` (default — uses built-in speakers)
+    - `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (enables voice cloning with reference audio)
+  - `fish`: fish-speech HuggingFace model repo
+    - `fishaudio/s1-mini` or `fishaudio/openaudio-s1-mini` (default)
+    - `fishaudio/fish-speech-1.5`
+  - `indextts`: IndexTTS HuggingFace model repo
+    - `IndexTeam/IndexTTS-2` (default)
+- **Finding Piper voices**: Check Piper documentation or available voice list
 - **Interactions**:
-  - Only used if `--voice-backend piper` is specified
-  - `--voice-lang`: Does not override voice, but should match voice language
+  - Ignored when `--voice-backend gtts` is selected
+  - For `piper`: specifies the voice model
+  - For `custom`, `fish`, `indextts`: specifies the HuggingFace model repo
+  - `--voice-lang`: Does not override voice, but should match voice language for Piper
 
 ### `--voice-lang <code>`
 - **Type**: Language code (e.g., `en`, `fr`, `es`)
@@ -358,23 +390,25 @@ Stage 3 generates voice output if `--scribe-voice` or `--slate-voice` is specifi
   - Force English pronunciation despite non-English output text
 - **Interactions**:
   - Only used if voice output is requested
-  - Works with both gTTS and Piper TTS
+  - Works with all TTS backends
   - Should match or be compatible with `--voice-model` if using Piper
   - Typically doesn't override text language (just voice synthesis)
 
 ### `--voice-match`
 - **Type**: Boolean flag
 - **Default**: Disabled
-- **Purpose**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics
+- **Purpose**: Automatically select the closest matching Piper TTS voice based on input speaker characteristics; also supplies a speaker prompt for `indextts` voice cloning
 - **How it works**:
   1. Extracts pitch and spectral features from input audio
   2. Estimates gender (Male: <140Hz, Female: >180Hz)
-  3. Selects the closest matching Piper voice for the target language
-  4. Falls back to default voice if no suitable match found
-- **Requirements**: `pip install -e .[piper]`; Piper TTS must be installed
+  3. Selects the closest matching Piper voice for the target language (when using `piper`)
+  4. Supplies a speaker reference audio prompt (when using `indextts`)
+  5. Falls back to default voice if no suitable match found
+- **Requirements**: `pip install -e .[piper]`; Piper TTS must be installed (when using `piper` backend)
 - **Interactions**:
   - Works with `--slate-voice` and Piper TTS
   - Pairs well with `--voice-backend piper`
+  - Provides reference audio for voice cloning with `--voice-backend custom` (Base model), `--voice-backend fish`, and `--voice-backend indextts`
   - See [VOICE_MATCHING.md](VOICE_MATCHING.md) for details
 
 ---
