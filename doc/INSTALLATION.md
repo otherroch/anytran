@@ -45,6 +45,14 @@ sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
 - YouTube: `pip install -e .[youtube]`
 - VAD: `pip install -e .[vad]`
 - Piper TTS: `pip install -e .[piper]`
+- Custom TTS (Qwen3-TTS): `pip install -e .[custom]`
+- Fish-speech TTS: `pip install -e .[fish]`
+- IndexTTS:
+  ```bash
+  GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git
+  pip install "anytran[index-tts]"
+  ```
+  > Note: IndexTTS is not published on PyPI. The `GIT_LFS_SKIP_SMUDGE=1` flag skips large example audio files from Git LFS that are not needed at runtime.
 - Whisper backends:
   - `pip install -e .[whispercpp]` or
   - `pip install -e .[faster-whisper]` or
