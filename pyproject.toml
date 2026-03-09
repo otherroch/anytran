@@ -32,6 +32,11 @@ vad = ["silero-vad"]
 piper = ["piper-tts"]
 custom = ["qwen-tts", "torch", "transformers"]
 fish = ["fish-speech", "torch", "huggingface_hub"]
+# coqui-tts is the Python 3.12-compatible maintained fork of the original
+# coqui-ai/TTS library. The original coqui-ai/TTS raised an error on
+# Python >= 3.12 due to the distutils removal; coqui-tts fixes this.
+# Install: pip install "anytran[coqui]"
+coqui = ["coqui-tts", "torch"]
 # IndexTTS is not published on PyPI; install it manually first.
 # The upstream repo uses Git LFS for example audio files which may exceed the LFS
 # budget. Use GIT_LFS_SKIP_SMUDGE=1 to skip those large files (not needed at runtime):
