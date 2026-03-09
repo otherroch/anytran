@@ -786,7 +786,8 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
     try:
         if not INDEXTTS_AVAILABLE:
             print("[IndexTTS][ERROR] indextts is not installed. "
-                  "Please install with: pip install indextts")
+                  "Install with: GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git "
+                  "&& pip install 'anytran[index-tts]'")
             return False
 
         model_name = voice_model if voice_model else _INDEXTTS_DEFAULT_MODEL
