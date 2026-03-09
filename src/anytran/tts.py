@@ -785,7 +785,7 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
     try:
         if not INDEXTTS_AVAILABLE:
             print("[IndexTTS][ERROR] indextts is not installed. "
-                  "Install with: pip install git+https://github.com/index-tts/index-tts.git "
+                  "Install with: GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git "
                   "&& pip install 'anytran[index-tts]'")
             return False
 
