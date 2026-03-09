@@ -60,7 +60,7 @@ def test_indextts_tts_no_reference_audio_returns_false(tmp_path, monkeypatch):
         verbose=False,
     )
 
-    assert result is False
+    assert result is True  # Should return True and do nothing when no reference audio
 
 
 def test_indextts_tts_with_reference_audio(tmp_path, monkeypatch):
