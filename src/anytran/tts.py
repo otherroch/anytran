@@ -1047,7 +1047,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                                     print(f"[TTS] librosa resample result: no data")
                                 use_indextts = False
                         if use_indextts and audio_data.size:
-                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            tts_pcm = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
                             if verbose:
                                 print(f"[TTS] IndexTTS synthesis complete: {len(tts_pcm)} samples")
                             return tts_pcm
@@ -1427,7 +1427,8 @@ def synthesize_tts_pcm_with_cloning(
                         if sr != rate:
                             audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
                         if audio_data.size:
-                            tts_pcm = (audio_data * 32768).astype(np.int16)
+                            audio_data = np.clip(audio_data, -1.0, 1.0)
+                            tts_pcm = (audio_data * 32767).astype(np.int16)
                             if verbose:
                                 print(f"[TTS] IndexTTS voice cloning complete: {len(tts_pcm)} samples")
                                 print("==========================================")
