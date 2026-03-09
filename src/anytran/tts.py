@@ -809,9 +809,22 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
         # When reference_audio is provided we write it to a temp file; otherwise
         # we cannot clone a voice and synthesis will fail.
         if reference_audio is None:
-            print("[IndexTTS][ERROR] reference_audio is required for IndexTTS voice synthesis. "
+            print("[IndexTTS][ERROR] reference_audio MAYBE required for IndexTTS voice synthesis. "
                   "Use --voice-match to supply a speaker prompt.")
-            return False
+            try:
+                engine.infer(
+                    spk_audio_prompt=None,
+                    text=text,
+                    output_path=output_wav,
+                    verbose=verbose and extra_verbose,
+                )
+            except Exception as exc:
+                print(f"[IndexTTS][ERROR] Synthesis failed: {exc}")
+                return False
+           
+            if verbose:
+                print(f"[IndexTTS] ✓ Synthesis successful, saved to {output_wav}")
+            return True
 
         import io
         import wave as _wave
