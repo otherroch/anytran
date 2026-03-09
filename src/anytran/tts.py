@@ -781,7 +781,8 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
         ``True`` on success, ``False`` on any failure.
     """
     global _indextts_model_cache
-
+    extra_verbose = False
+    
     try:
         if not INDEXTTS_AVAILABLE:
             print("[IndexTTS][ERROR] indextts is not installed. "
@@ -798,7 +799,7 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
         else:
             if verbose:
                 print(f"[IndexTTS] Loading model: {model_name}")
-            engine = _load_indextts_engine(model_name, verbose=verbose)
+            engine = _load_indextts_engine(model_name, verbose=verbose and extra_verbose)
             if engine is None:
                 return False
             _indextts_model_cache[model_name] = engine
@@ -839,7 +840,7 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
                 spk_audio_prompt=ref_fp_path,
                 text=text,
                 output_path=output_wav,
-                verbose=verbose,
+                verbose=verbose and extra_verbose,
             )
         finally:
             import builtins
