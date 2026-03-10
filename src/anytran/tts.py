@@ -1103,17 +1103,23 @@ def coqui_tts(text, voice_model, output_lang, output_wav,
         else:
             if verbose:
                 print(f"[CoquiTTS] Synthesizing (lang={lang})...")
+            # For multi-speaker models (e.g. XTTS v2), a speaker must always be
+            # provided.  Pick the first available built-in speaker when the caller
+            # has not supplied a reference audio clip for voice cloning.
+            speakers = getattr(engine, "speakers", None)
+            default_speaker = speakers[0] if speakers else None
+            if default_speaker and verbose:
+                print(f"[CoquiTTS] Using default speaker: {default_speaker}")
             if getattr(engine, "is_multi_lingual", False):
-                engine.tts_to_file(
-                    text=text,
-                    language=lang,
-                    file_path=output_wav,
-                )
+                kw = {"text": text, "language": lang, "file_path": output_wav}
+                if default_speaker is not None:
+                    kw["speaker"] = default_speaker
+                engine.tts_to_file(**kw)
             else:
-                engine.tts_to_file(
-                    text=text,
-                    file_path=output_wav,
-                )
+                kw = {"text": text, "file_path": output_wav}
+                if default_speaker is not None:
+                    kw["speaker"] = default_speaker
+                engine.tts_to_file(**kw)
 
         if verbose:
             print(f"[CoquiTTS] ✓ Synthesis successful, saved to {output_wav}")
