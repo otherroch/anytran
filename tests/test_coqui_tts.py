@@ -432,7 +432,7 @@ def test_synthesize_tts_pcm_with_cloning_coqui_no_voice_match(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Python 3.12 distutils shim
+# Language mapping constants
 # ---------------------------------------------------------------------------
 
 def test_coqui_xtts_languages_set():

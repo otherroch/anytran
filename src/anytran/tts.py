@@ -32,23 +32,7 @@ except Exception:
 
 # ── Coqui TTS (coqui-tts) ──────────────────────────────────────────────────
 # coqui-tts is the Python 3.12-compatible maintained fork of the original
-# coqui-ai/TTS library.  The original coqui-ai/TTS restricted itself to
-# python < 3.12 and relied on the ``distutils`` module that was removed in
-# Python 3.12.  coqui-tts (PyPI: coqui-tts) fixes both issues.
-#
-# Compatibility shim: Python 3.12 removed ``distutils``.  Before importing TTS
-# we ensure ``distutils`` is resolvable by falling back to the copy bundled
-# with setuptools (setuptools._distutils, present since setuptools >= 60).
-try:
-    import distutils as _coqui_distutils_probe  # noqa: F401
-    del _coqui_distutils_probe
-except ModuleNotFoundError:
-    try:
-        import setuptools._distutils as _coqui_distutils_shim
-        sys.modules.setdefault("distutils", _coqui_distutils_shim)
-        del _coqui_distutils_shim
-    except ImportError:
-        pass
+# coqui-ai/TTS library.  Install: pip install "anytran[coqui]"
 try:
     from TTS.api import TTS as _CoquiTTS
     COQUI_TTS_AVAILABLE = True
@@ -1016,8 +1000,7 @@ def coqui_tts(text, voice_model, output_lang, output_wav,
     Synthesize text to audio using coqui-tts (Python 3.12-compatible fork).
 
     coqui-tts is the actively maintained fork of the original coqui-ai/TTS
-    library that supports Python 3.9–3.14 and fixes the Python 3.12
-    ``distutils`` removal issue.  Install: ``pip install "anytran[coqui]"``.
+    library that supports Python 3.9–3.14.  Install: ``pip install "anytran[coqui]"``.
 
     The default model is XTTS v2
     (``tts_models/multilingual/multi-dataset/xtts_v2``), which supports 17
@@ -1036,8 +1019,8 @@ def coqui_tts(text, voice_model, output_lang, output_wav,
         Path to the output WAV file.
     reference_audio : np.ndarray or None
         Reference audio for zero-shot voice cloning (int16 PCM or float32 in
-        ``[-1, 1]``).  When *None* the model synthesizes with its built-in
-        default speaker (XTTS v2 requires a reference when cloning).
+        ``[-1, 1]``).  When *None* the model synthesizes using its default
+        speaker (the engine chooses the speaker automatically).
     reference_sample_rate : int
         Sample rate of *reference_audio* (default: 16000 Hz).
     verbose : bool
@@ -1120,23 +1103,15 @@ def coqui_tts(text, voice_model, output_lang, output_wav,
         else:
             if verbose:
                 print(f"[CoquiTTS] Synthesizing (lang={lang})...")
-            # tts --model_name "tts_models/multilingual/multi-dataset/xtts_v2"  --list_speaker_idxs
-            # 'Claribel Dervla', 'Daisy Studious', 'Gracie Wise', 'Tammie Ema', 'Alison Dietlinde', 'Ana Florence', 'Annmarie Nele', 'Asya Anara', 'Brenda Stern', 'Gitta Nikolina', 'Henriette Usha', 'Sofia Hellen', 'Tammy Grit', 
-            # 'Tanja Adelina', 'Vjollca Johnnie', 'Andrew Chipper', 'Badr Odhiambo', 'Dionisio Schuyler', 'Royston Min', 'Viktor Eka', 'Abrahan Mack', 'Adde Michal',
-            # 'aldur Sanjin', 'Craig Gutsy', 'Damien Black', 'Gilberto Mathias', 'Ilkin Urbano', 'Kazuhiko Atallah', 'Ludvig Milivoj', 'Suad Qasim', 'Torcull Diarmuid', 'Viktor Menelaos', 'Zacharie Aimilios', 'Nova Hogarth', 'Maja Ruoho',
-            # 'Uta Obando', 'Lidiya Szekeres', 'Chandra MacFarland', 'Szofi Granger', 'Camilla Holmström', 'Lilya Stainthorpe', 'Zofija Kendrick', 'Narelle Moon', 
-            # 'Barbora MacLean', 'Alexandra Hisakawa', 'Alma María', 'Rosemary Okafor', 'Ige Behringer', 'Filip Traverse', 'Damjan Chapman', 'Wulf Carlevaro', 'Aaron Dreschner', 'Kumar Dahl', 'Eugenio Mataracı', 'Ferran Simen', 'Xavier Hayasaka', 'Luis Moray', 'Marcos Rudaski']
             if getattr(engine, "is_multi_lingual", False):
                 engine.tts_to_file(
                     text=text,
                     language=lang,
-                    speaker='Daisy Studious',
                     file_path=output_wav,
                 )
             else:
                 engine.tts_to_file(
                     text=text,
-                    speaker='Daisy Studious',
                     file_path=output_wav,
                 )
 
