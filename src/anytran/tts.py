@@ -1120,16 +1120,23 @@ def coqui_tts(text, voice_model, output_lang, output_wav,
         else:
             if verbose:
                 print(f"[CoquiTTS] Synthesizing (lang={lang})...")
-
+            # tts --model_name "tts_models/multilingual/multi-dataset/xtts_v2"  --list_speaker_idxs
+            # 'Claribel Dervla', 'Daisy Studious', 'Gracie Wise', 'Tammie Ema', 'Alison Dietlinde', 'Ana Florence', 'Annmarie Nele', 'Asya Anara', 'Brenda Stern', 'Gitta Nikolina', 'Henriette Usha', 'Sofia Hellen', 'Tammy Grit', 
+            # 'Tanja Adelina', 'Vjollca Johnnie', 'Andrew Chipper', 'Badr Odhiambo', 'Dionisio Schuyler', 'Royston Min', 'Viktor Eka', 'Abrahan Mack', 'Adde Michal',
+            # 'aldur Sanjin', 'Craig Gutsy', 'Damien Black', 'Gilberto Mathias', 'Ilkin Urbano', 'Kazuhiko Atallah', 'Ludvig Milivoj', 'Suad Qasim', 'Torcull Diarmuid', 'Viktor Menelaos', 'Zacharie Aimilios', 'Nova Hogarth', 'Maja Ruoho',
+            # 'Uta Obando', 'Lidiya Szekeres', 'Chandra MacFarland', 'Szofi Granger', 'Camilla Holmström', 'Lilya Stainthorpe', 'Zofija Kendrick', 'Narelle Moon', 
+            # 'Barbora MacLean', 'Alexandra Hisakawa', 'Alma María', 'Rosemary Okafor', 'Ige Behringer', 'Filip Traverse', 'Damjan Chapman', 'Wulf Carlevaro', 'Aaron Dreschner', 'Kumar Dahl', 'Eugenio Mataracı', 'Ferran Simen', 'Xavier Hayasaka', 'Luis Moray', 'Marcos Rudaski']
             if getattr(engine, "is_multi_lingual", False):
                 engine.tts_to_file(
                     text=text,
                     language=lang,
+                    speaker='Daisy Studious',
                     file_path=output_wav,
                 )
             else:
                 engine.tts_to_file(
                     text=text,
+                    speaker='Daisy Studious',
                     file_path=output_wav,
                 )
 
