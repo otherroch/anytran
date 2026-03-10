@@ -71,6 +71,9 @@ def build_pipeline_config(args):
         "lang_prefix": getattr(args, "lang_prefix", False),
         "normalize": not getattr(args, "no_norm", False),
         "normalize_input": not getattr(args, "no_input_norm", False),
+
+        # Capture original input voice
+        "capture_voice": getattr(args, "capture_voice", None),
     }
     
     return config
@@ -123,6 +126,7 @@ def _run_web_pipeline(args, config):
         voice_backend=config["voice_backend"],
         voice_model=config["voice_model"],
         voice_match=config["voice_match"],
+        capture_voice_path=config.get("capture_voice"),
     )
     return 0
 
@@ -160,6 +164,7 @@ def _run_output_pipeline(args, config):
         dedup=config["dedup"],
         lang_prefix=config["lang_prefix"],
         normalize=config.get("normalize", True),
+        capture_voice_path=config.get("capture_voice"),
     )
     return 0
 
@@ -200,6 +205,7 @@ def _run_youtube_pipeline(args, config):
         dedup=config["dedup"],
         lang_prefix=config["lang_prefix"],
         normalize=config.get("normalize", True),
+        capture_voice_path=config.get("capture_voice"),
     )
     return 0
 
@@ -240,6 +246,7 @@ def _run_rtsp_pipeline(args, config):
             dedup=config["dedup"],
             lang_prefix=config["lang_prefix"],
             normalize=config.get("normalize", True),
+            capture_voice_path=config.get("capture_voice"),
         )
     else:
         run_multi_rtsp(
@@ -275,6 +282,7 @@ def _run_rtsp_pipeline(args, config):
             dedup=config["dedup"],
             lang_prefix=config["lang_prefix"],
             normalize=config.get("normalize", True),
+            capture_voice_path=config.get("capture_voice"),
         )
     return 0
 

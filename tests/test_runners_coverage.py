@@ -11,6 +11,8 @@ def runner_modules():
         "anytran.runners.run_file_input",
         "anytran.runners.run_realtime_output",
         "anytran.runners.run_realtime_youtube",
+        "anytran.runners.run_realtime_rtsp",
+        "anytran.runners.run_multi_rtsp",
         "anytran.runners",
         "anytran.stream_output",
         "anytran.stream_youtube",
@@ -22,6 +24,8 @@ def runner_modules():
         importlib.import_module("anytran.runners.run_file_input"),
         importlib.import_module("anytran.runners.run_realtime_output"),
         importlib.import_module("anytran.runners.run_realtime_youtube"),
+        importlib.import_module("anytran.runners.run_realtime_rtsp"),
+        importlib.import_module("anytran.runners.run_multi_rtsp"),
     )
     try:
         yield modules
@@ -34,7 +38,7 @@ def runner_modules():
 
 
 def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path, runner_modules):
-    rfi, _, _ = runner_modules
+    rfi, _, _, _, _ = runner_modules
     input_path = tmp_path / "input.txt"
     input_path.write_text("hola. adios", encoding="utf-8")
 
@@ -97,7 +101,7 @@ def test_run_file_input_text_translation_and_audio_outputs(monkeypatch, tmp_path
 
 
 def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_modules):
-    rfi, _, _ = runner_modules
+    rfi, _, _, _, _ = runner_modules
     audio_array = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
     monkeypatch.setattr(rfi, "load_audio_any", lambda path: (audio_array, 16000))
     monkeypatch.setattr(rfi, "compute_window_params", lambda *args, **kwargs: (2, 0))
@@ -149,7 +153,7 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
 
 def test_run_realtime_output_non_windows_returns(monkeypatch, runner_modules):
-    _, rro, _ = runner_modules
+    _, rro, _, _, _ = runner_modules
     monkeypatch.setattr(sys, "platform", "linux")
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("should not be called")
@@ -158,7 +162,7 @@ def test_run_realtime_output_non_windows_returns(monkeypatch, runner_modules):
 
 
 def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modules):
-    _, rro, _ = runner_modules
+    _, rro, _, _, _ = runner_modules
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(rro.signal, "signal", lambda *args, **kwargs: None)
     monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", lambda *args, **kwargs: {"id": "loop"})
@@ -218,7 +222,7 @@ def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modu
 
 
 def test_run_realtime_youtube_invalid_url(monkeypatch, runner_modules):
-    _, _, rry = runner_modules
+    _, _, rry, _, _ = runner_modules
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: None)
     called = {}
 
@@ -231,7 +235,7 @@ def test_run_realtime_youtube_invalid_url(monkeypatch, runner_modules):
 
 
 def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path, runner_modules):
-    _, _, rry = runner_modules
+    _, _, rry, _, _ = runner_modules
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: "vid123")
     validate_calls = {}
     def fake_validate(api_key, vid, verbose=False):
@@ -308,7 +312,7 @@ def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path
     ],
 )
 def test_run_realtime_youtube_respects_dedup_flag(monkeypatch, tmp_path, runner_modules, dedup_flag, expected_lines):
-    _, _, rry = runner_modules
+    _, _, rry, _, _ = runner_modules
     monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: "vid123")
     monkeypatch.setattr(rry, "validate_youtube_video", lambda *args, **kwargs: {"contentDetails": {"duration": "PT5S"}})
     monkeypatch.setattr(rry, "parse_iso8601_duration", lambda duration: 5)
@@ -347,3 +351,191 @@ def test_run_realtime_youtube_respects_dedup_flag(monkeypatch, tmp_path, runner_
 
     assert scribe_text_file.read_text(encoding="utf-8").splitlines() == expected_lines
     assert slate_text_file.read_text(encoding="utf-8").splitlines() == expected_lines
+
+
+# --------------------------------------------------------------------------
+# Tests for --capture-voice (capture original input audio to file)
+# --------------------------------------------------------------------------
+
+def test_run_realtime_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
+    """run_realtime_rtsp saves raw input audio when capture_voice_path is set."""
+    _, _, _, rrr, _ = runner_modules
+    monkeypatch.setattr(rrr.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rrr, "compute_window_params", lambda *args, **kwargs: (2, 0))
+    monkeypatch.setattr(rrr, "normalize_text", lambda text: text)
+    # Avoid 0.5-second sleep in the KeyboardInterrupt handler
+    monkeypatch.setattr(rrr.time, "sleep", lambda _: None)
+
+    output_calls = []
+    monkeypatch.setattr(rrr, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
+
+    call_count = {"n": 0}
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        call_count["n"] += 1
+        # Stop the loop after 2 chunks by raising KeyboardInterrupt
+        if call_count["n"] >= 2:
+            raise KeyboardInterrupt()
+        return {"scribe": "hello", "slate": None}
+
+    monkeypatch.setattr(rrr, "process_audio_chunk", fake_process_audio_chunk)
+
+    def fake_stream_rtsp_audio(rtsp_url, audio_queue):
+        audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        audio_queue.put(np.array([0.3, 0.4], dtype=np.float32))
+
+    monkeypatch.setattr(rrr, "stream_rtsp_audio", fake_stream_rtsp_audio)
+
+    capture_path = tmp_path / "captured.wav"
+    rrr.run_realtime_rtsp(
+        "rtsp://example.com/stream",
+        capture_voice_path=str(capture_path),
+    )
+
+    assert len(output_calls) == 1
+    assert output_calls[0][0] == str(capture_path)
+    np.testing.assert_allclose(output_calls[0][1], np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32))
+
+
+def test_run_realtime_output_capture_voice(monkeypatch, tmp_path, runner_modules):
+    """run_realtime_output saves raw input audio when capture_voice_path is set."""
+    _, rro, _, _, _ = runner_modules
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(rro.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", lambda *args, **kwargs: {"id": "loop"})
+    monkeypatch.setattr(rro, "compute_window_params", lambda *args, **kwargs: (2, 0))
+    monkeypatch.setattr(rro, "normalize_text", lambda text: text)
+
+    output_calls = []
+    monkeypatch.setattr(rro, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        return {"scribe": "hello", "slate": None}
+
+    monkeypatch.setattr(rro, "process_audio_chunk", fake_process_audio_chunk)
+
+    def fake_stream_output_audio(queue, device_info, rate, stop_flag, verbose):
+        queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        queue.put(np.array([0.3, 0.4], dtype=np.float32))
+        time.sleep(0.05)
+        stop_flag.set()
+
+    monkeypatch.setattr(rro, "stream_output_audio", fake_stream_output_audio)
+
+    capture_path = tmp_path / "captured_output.wav"
+    rro.run_realtime_output(capture_voice_path=str(capture_path))
+
+    assert len(output_calls) == 1
+    assert output_calls[0][0] == str(capture_path)
+    np.testing.assert_allclose(output_calls[0][1], np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32))
+
+
+def test_run_realtime_youtube_capture_voice(monkeypatch, tmp_path, runner_modules):
+    """run_realtime_youtube saves raw input audio when capture_voice_path is set."""
+    _, _, rry, _, _ = runner_modules
+    monkeypatch.setattr(rry, "extract_youtube_video_id", lambda url: "vid123")
+    monkeypatch.setattr(rry, "validate_youtube_video", lambda *args, **kwargs: {"contentDetails": {"duration": "PT5S"}})
+    monkeypatch.setattr(rry, "parse_iso8601_duration", lambda duration: 5)
+    monkeypatch.setattr(rry.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rry, "compute_window_params", lambda *args, **kwargs: (2, 0))
+    monkeypatch.setattr(rry, "normalize_text", lambda text: text)
+    monkeypatch.setattr(rry.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rry, "get_youtube_audio_stream_url", lambda *args, **kwargs: "http://example.com/audio")
+
+    def fake_stream_youtube_audio(resolve_audio_url, audio_queue, rate, stop_flag, expected_duration, max_retries, verbose, _):
+        resolve_audio_url()
+        audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        audio_queue.put(np.array([0.3, 0.4], dtype=np.float32))
+        time.sleep(0.05)
+        stop_flag.set()
+
+    monkeypatch.setattr(rry, "stream_youtube_audio", fake_stream_youtube_audio)
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        return {"scribe": "hello", "slate": None}
+
+    monkeypatch.setattr(rry, "process_audio_chunk", fake_process_audio_chunk)
+
+    output_calls = []
+    monkeypatch.setattr(rry, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
+
+    capture_path = tmp_path / "captured_yt.wav"
+    rry.run_realtime_youtube(
+        "https://youtube.com/watch?v=vid123",
+        "api-key",
+        capture_voice_path=str(capture_path),
+    )
+
+    assert len(output_calls) == 1
+    assert output_calls[0][0] == str(capture_path)
+    np.testing.assert_allclose(output_calls[0][1], np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32))
+
+
+def test_run_multi_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
+    """run_multi_rtsp saves per-stream raw input audio when capture_voice_path is set."""
+    _, _, _, _, rmr = runner_modules
+    monkeypatch.setattr(rmr.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rmr, "compute_window_params", lambda *args, **kwargs: (2, 0))
+    monkeypatch.setattr(rmr, "normalize_text", lambda text: text)
+
+    output_calls = []
+    monkeypatch.setattr(rmr, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
+
+    call_counts = {}
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, stream_id=None, **kwargs):
+        key = stream_id or "unknown"
+        call_counts[key] = call_counts.get(key, 0) + 1
+        if call_counts[key] >= 2:
+            raise KeyboardInterrupt()
+        return {"scribe": "hello", "slate": None}
+
+    monkeypatch.setattr(rmr, "process_audio_chunk", fake_process_audio_chunk)
+
+    def fake_stream_rtsp_audio(rtsp_url, audio_queue):
+        audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        audio_queue.put(np.array([0.3, 0.4], dtype=np.float32))
+
+    monkeypatch.setattr(rmr, "stream_rtsp_audio", fake_stream_rtsp_audio)
+
+    capture_path = tmp_path / "captured_multi.wav"
+    rmr.run_multi_rtsp(
+        ["rtsp://cam1", "rtsp://cam2"],
+        capture_voice_path=str(capture_path),
+    )
+
+    # Each stream saves a per-stream file like captured_multi_stream1.wav and captured_multi_stream2.wav
+    saved_paths = {c[0] for c in output_calls}
+    assert str(tmp_path / "captured_multi_stream1.wav") in saved_paths
+    assert str(tmp_path / "captured_multi_stream2.wav") in saved_paths
+    for path, data in output_calls:
+        np.testing.assert_allclose(data, np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32))
+
+
+def test_capture_voice_not_called_when_path_is_none(monkeypatch, tmp_path, runner_modules):
+    """When capture_voice_path is None, output_audio is not called for capture."""
+    _, rro, _, _, _ = runner_modules
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(rro.signal, "signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rro, "get_wasapi_loopback_device_info", lambda *args, **kwargs: {"id": "loop"})
+    monkeypatch.setattr(rro, "compute_window_params", lambda *args, **kwargs: (2, 0))
+
+    output_calls = []
+    monkeypatch.setattr(rro, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
+
+    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+        return {"scribe": "hello", "slate": None}
+
+    monkeypatch.setattr(rro, "process_audio_chunk", fake_process_audio_chunk)
+
+    def fake_stream_output_audio(queue, device_info, rate, stop_flag, verbose):
+        queue.put(np.array([0.1, 0.2], dtype=np.float32))
+        time.sleep(0.05)
+        stop_flag.set()
+
+    monkeypatch.setattr(rro, "stream_output_audio", fake_stream_output_audio)
+
+    # No capture_voice_path — output_audio should not be called
+    rro.run_realtime_output(capture_voice_path=None)
+
+    assert output_calls == []

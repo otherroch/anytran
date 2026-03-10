@@ -123,6 +123,9 @@ Examples:
     # Stage 2 outputs (Translation to output-lang, only if output-lang != en)
     parser.add_argument("--slate-text", type=str, help="Save translation to text file")
     parser.add_argument("--slate-voice", type=str, help="Save translated voice output as audio file")
+
+    # Capture original input voice (all inputs except --input)
+    parser.add_argument("--capture-voice", type=str, help="Save the original input audio to a file (not supported with --input)")
     
     # Scribe (Speech-to-Text) options
     scribe_group = parser.add_argument_group("scribe options (speech-to-text / Stage 1)")
