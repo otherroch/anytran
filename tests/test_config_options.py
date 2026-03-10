@@ -765,5 +765,57 @@ class TestBooleanOptionInversion(unittest.TestCase):
         self.assertFalse(data["no_auto_download"])
 
 
+class TestVoiceBackendCLI(unittest.TestCase):
+    """Tests for --voice-backend coqui CLI option."""
+
+    def _parse_genconfig(self, argv):
+        """Helper: run main() with --genconfig and return the parsed config dict."""
+        captured = io.StringIO()
+        with patch("sys.argv", argv + ["--genconfig", "-"]):
+            with patch("sys.stdout", captured):
+                result = main()
+        self.assertEqual(result, 0)
+        output = captured.getvalue()
+        json_start = output.find("{")
+        return json.loads(output[json_start:])
+
+    def test_voice_backend_coqui_accepted(self):
+        """--voice-backend coqui must be accepted without error."""
+        data = self._parse_genconfig(["anytran", "--voice-backend", "coqui"])
+        self.assertEqual(data["voice_backend"], "coqui")
+
+    def test_voice_backend_coqui_with_voice_match(self):
+        """--voice-backend coqui --voice-match must be accepted."""
+        data = self._parse_genconfig([
+            "anytran", "--voice-backend", "coqui", "--voice-match",
+        ])
+        self.assertEqual(data["voice_backend"], "coqui")
+        self.assertTrue(data["voice_match"])
+
+    def test_voice_backend_coqui_with_voice_model(self):
+        """--voice-backend coqui accepts a custom model via --voice-model."""
+        model = "tts_models/multilingual/multi-dataset/xtts_v2"
+        data = self._parse_genconfig([
+            "anytran", "--voice-backend", "coqui", "--voice-model", model,
+        ])
+        self.assertEqual(data["voice_backend"], "coqui")
+        self.assertEqual(data["voice_model"], model)
+
+    def test_voice_backend_invalid_choice_rejected(self):
+        """An unrecognised --voice-backend value must cause SystemExit."""
+        with self.assertRaises(SystemExit):
+            with patch("sys.argv", [
+                "anytran", "--voice-backend", "notabackend", "--genconfig", "-",
+            ]):
+                main()
+
+    def test_all_backend_choices_accepted(self):
+        """Every documented --voice-backend choice must parse without error."""
+        for backend in ("auto", "gtts", "piper", "custom", "fish", "indextts", "coqui"):
+            data = self._parse_genconfig(["anytran", "--voice-backend", backend])
+            self.assertEqual(data["voice_backend"], backend,
+                             f"Expected voice_backend={backend!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ The backend is selected with `--voice-backend`.
 | `custom`   | Local neural (Qwen3-TTS) | ✓ | ✓ (Base model) | `pip install -e .[custom]` |
 | `fish`     | Local neural (fish-speech) | ✓ | ✓          | `pip install -e .[fish]`         |
 | `indextts` | Local neural (IndexTTS)    | ✓ | ✓          | see [IndexTTS install](#indextts-indexteamindextts-2) |
+| `coqui`    | Local neural (coqui-tts XTTS v2) | ✓ | ✓     | `pip install -e .[coqui]`        |
 
 ---
 
@@ -201,21 +202,78 @@ Without `--voice-match`, anytran will attempt synthesis without a reference prom
 
 ---
 
+## `coqui` — coqui-tts (XTTS v2)
+
+Local neural TTS based on [coqui-tts](https://pypi.org/project/coqui-tts/), the Python 3.12-compatible
+maintained fork of the original coqui-ai/TTS library.  
+Uses the XTTS v2 model for high-quality, multilingual speech synthesis with zero-shot voice cloning.
+
+- **Install**: `pip install "anytran[coqui]"`
+- **Offline**: Yes (after initial model download)
+- **Python 3.12**: ✓ fully supported (uses `coqui-tts`, not the unmaintained `TTS` package)
+- **GPU recommended**: Yes (CUDA auto-detected; falls back to CPU)
+
+> **Note on the original coqui-ai/TTS**: The original package (`pip install TTS`) does not support
+> Python 3.12 — it raises `RuntimeError: TTS requires python >= 3.9 and < 3.12`. The `coqui-tts`
+> fork fixes this and is API-compatible.
+
+### Models
+
+| Model | Description |
+|-------|-------------|
+| `tts_models/multilingual/multi-dataset/xtts_v2` | Default. 17 languages, zero-shot voice cloning. |
+
+XTTS v2 supports 17 languages: `en`, `es`, `fr`, `de`, `it`, `pt`, `pl`, `tr`, `ru`, `nl`, `cs`,
+`ar`, `zh-cn`, `hu`, `ko`, `ja`, `hi`.
+
+### Basic usage
+
+```bash
+# Synthesize in French (no voice cloning)
+anytran --input sample.wav --output-lang fr --slate-voice output.wav \
+  --voice-backend coqui
+```
+
+### Voice cloning with --voice-match
+
+When `--voice-match` is enabled, anytran passes a reference audio clip from the input stream
+to XTTS v2 for zero-shot voice cloning.  The synthesized speech will closely match the
+speaker's voice:
+
+```bash
+anytran --input sample.wav --output-lang fr --slate-voice output.wav \
+  --voice-backend coqui --voice-match
+```
+
+### Specifying a model
+
+Use `--voice-model` to override the default XTTS v2 model with any coqui-tts model identifier:
+
+```bash
+anytran --input sample.wav --output-lang fr --slate-voice output.wav \
+  --voice-backend coqui \
+  --voice-model tts_models/multilingual/multi-dataset/xtts_v2
+```
+
+---
+
 ## Comparing backends
 
-| Feature | gtts | piper | custom | fish | indextts |
-|---------|------|-------|--------|------|----------|
-| Internet required | ✓ | ✗ | ✗ | ✗ | ✗ |
-| Voice cloning | ✗ | ✗ | ✓ (Base) | ✓ | ✓ |
-| GPU needed | ✗ | ✗ | recommended | recommended | recommended |
-| Language breadth | wide | wide | wide | wide | wide |
-| Naturalness | medium | good | excellent | excellent | excellent |
-| Speed (CPU) | fast (cloud) | fast | slow | slow | slow |
+| Feature | gtts | piper | custom | fish | indextts | coqui |
+|---------|------|-------|--------|------|----------|-------|
+| Internet required | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Voice cloning | ✗ | ✗ | ✓ (Base) | ✓ | ✓ | ✓ |
+| GPU needed | ✗ | ✗ | recommended | recommended | recommended | recommended |
+| Language breadth | wide | wide | wide | wide | wide | 17 languages |
+| Naturalness | medium | good | excellent | excellent | excellent | excellent |
+| Speed (CPU) | fast (cloud) | fast | slow | slow | slow | slow |
+| Python 3.12 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ---
 
 ## See also
 
-- [Voice Matching](VOICE_MATCHING.md) — auto-matching voice features for Piper, custom (Base model), fish, and IndexTTS
+- [Voice Matching](VOICE_MATCHING.md) — auto-matching voice features for Piper, custom (Base model), fish, IndexTTS, and coqui
 - [Command Line Options Reference](OPTIONS.md) — full reference for `--voice-backend`, `--voice-model`, `--voice-lang`, and `--voice-match`
 - [Installation](INSTALLATION.md) — GPU support and per-feature install commands
+

@@ -30,6 +30,25 @@ except Exception:
     _IndexTTS2 = None
     INDEXTTS_AVAILABLE = False
 
+# ── Coqui TTS (coqui-tts) ──────────────────────────────────────────────────
+# coqui-tts is the Python 3.12-compatible maintained fork of the original
+# coqui-ai/TTS library.  Install: pip install "anytran[coqui]"
+try:
+    from TTS.api import TTS as _CoquiTTS
+    COQUI_TTS_AVAILABLE = True
+except ImportError:
+    _CoquiTTS = None
+    COQUI_TTS_AVAILABLE = False
+except RuntimeError:
+    # The original coqui-ai/TTS package (not coqui-tts) raises RuntimeError
+    # on Python >= 3.12: "TTS requires python >= 3.9 and < 3.12".
+    # Install the maintained fork instead: pip install coqui-tts
+    _CoquiTTS = None
+    COQUI_TTS_AVAILABLE = False
+except Exception:
+    _CoquiTTS = None
+    COQUI_TTS_AVAILABLE = False
+
 try:
     from fish_speech.inference_engine import TTSInferenceEngine as _FishTTSInferenceEngine
     from fish_speech.models.text2semantic.inference import launch_thread_safe_queue as _fish_launch_llama_queue
@@ -102,8 +121,28 @@ _piper_voice_cache = {}
 _custom_model_cache = {}
 _fish_model_cache = {}
 _indextts_model_cache = {}
+_coqui_model_cache = {}
 
 _INDEXTTS_DEFAULT_MODEL = "IndexTeam/IndexTTS-2"
+
+# Default coqui-tts model: XTTS v2 is the multi-lingual, voice-cloning model.
+# Install: pip install "anytran[coqui]"
+_COQUI_DEFAULT_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+# XTTS v2 supported language codes (ISO 639-1 / XTTS-specific).
+_COQUI_XTTS_LANGUAGES = frozenset({
+    "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru",
+    "nl", "cs", "ar", "zh-cn", "hu", "ko", "ja", "hi",
+})
+
+# Map common BCP-47 / ISO 639-1 codes to the codes expected by XTTS v2.
+_COQUI_LANG_MAP = {
+    "zh": "zh-cn",
+    "zho": "zh-cn",
+    "cmn": "zh-cn",
+    "zh-tw": "zh-cn",
+    "zh-hk": "zh-cn",
+}
 
 # Fish-speech model name aliases: the problem statement uses "fishaudio/s1-mini"
 # but the canonical HuggingFace repo is "fishaudio/openaudio-s1-mini".
@@ -870,6 +909,221 @@ def indextts_tts(text, voice_model, output_wav, reference_audio=None, reference_
         return False
 
 
+def _map_to_coqui_language(output_lang):
+    """
+    Map an output language code to the code expected by coqui-tts / XTTS v2.
+
+    XTTS v2 uses two-letter ISO 639-1 codes for most languages and ``zh-cn``
+    for Mandarin Chinese.  BCP-47 region suffixes (e.g. ``en-US``) are
+    stripped.  Codes not recognised by XTTS v2 fall back to ``"en"``.
+
+    Parameters
+    ----------
+    output_lang : str or None
+        Language tag, e.g. ``"en"``, ``"fr"``, ``"zh"``, ``"zh-CN"``.
+
+    Returns
+    -------
+    str
+        Language code accepted by coqui-tts XTTS v2.
+    """
+    if not output_lang:
+        return "en"
+    lang = output_lang.lower().strip()
+    # Normalise region suffixes such as en-US → en, but keep zh-cn intact
+    if lang in _COQUI_LANG_MAP:
+        lang = _COQUI_LANG_MAP[lang]
+    elif lang not in _COQUI_XTTS_LANGUAGES:
+        # Strip region tag: fr-ca → fr
+        base = lang.split("-")[0].split("_")[0]
+        lang = _COQUI_LANG_MAP.get(base, base)
+        if lang not in _COQUI_XTTS_LANGUAGES:
+            lang = "en"
+    return lang
+
+
+def _load_coqui_engine(model_name, verbose=False):
+    """
+    Load a coqui-tts TTS engine for the given model name.
+
+    The model is downloaded on first use by coqui-tts itself (stored in
+    ``~/.local/share/tts``).  Subsequent calls with the same model name use
+    the cached download.
+
+    Parameters
+    ----------
+    model_name : str
+        Coqui-tts model identifier, e.g.
+        ``"tts_models/multilingual/multi-dataset/xtts_v2"``.
+    verbose : bool
+        Print debug information.
+
+    Returns
+    -------
+    TTS or None
+        Loaded ``TTS`` engine instance, or ``None`` on failure.
+    """
+    import traceback as _traceback
+
+    try:
+        if not COQUI_TTS_AVAILABLE:
+            return None
+
+        device = "cpu"
+        if TORCH_AVAILABLE:
+            import torch as _torch
+            if _torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(_torch.backends, "mps") and _torch.backends.mps.is_available():
+                device = "mps"
+
+        if verbose:
+            print(f"[CoquiTTS] Loading model '{model_name}' on {device}...")
+
+        engine = _CoquiTTS(model_name=model_name)
+        engine.to(device)
+
+        if verbose:
+            print(f"[CoquiTTS] ✓ Engine loaded successfully")
+
+        return engine
+
+    except Exception as exc:
+        print(f"[CoquiTTS][ERROR] Failed to load engine: {exc}")
+        _traceback.print_exc()
+        return None
+
+
+def coqui_tts(text, voice_model, output_lang, output_wav,
+              reference_audio=None, reference_sample_rate=16000, verbose=False):
+    """
+    Synthesize text to audio using coqui-tts (Python 3.12-compatible fork).
+
+    coqui-tts is the actively maintained fork of the original coqui-ai/TTS
+    library that supports Python 3.9–3.14.  Install: ``pip install "anytran[coqui]"``.
+
+    The default model is XTTS v2
+    (``tts_models/multilingual/multi-dataset/xtts_v2``), which supports 17
+    languages and zero-shot voice cloning from a short audio reference.
+
+    Parameters
+    ----------
+    text : str
+        Text to synthesize.
+    voice_model : str or None
+        Coqui-tts model identifier.  When *None* or empty the default XTTS v2
+        model is used.
+    output_lang : str or None
+        BCP-47 / ISO 639-1 language code for the synthesized speech.
+    output_wav : str
+        Path to the output WAV file.
+    reference_audio : np.ndarray or None
+        Reference audio for zero-shot voice cloning (int16 PCM or float32 in
+        ``[-1, 1]``).  When *None* the model synthesizes using its default
+        speaker (the engine chooses the speaker automatically).
+    reference_sample_rate : int
+        Sample rate of *reference_audio* (default: 16000 Hz).
+    verbose : bool
+        Print debug information.
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` on any failure.
+    """
+    global _coqui_model_cache
+
+    try:
+        if not COQUI_TTS_AVAILABLE:
+            print("[CoquiTTS][ERROR] coqui-tts is not installed. "
+                  "Install with: pip install 'anytran[coqui]'")
+            return False
+
+        model_name = voice_model if voice_model else _COQUI_DEFAULT_MODEL
+
+        # Load / reuse cached engine
+        if model_name in _coqui_model_cache:
+            if verbose:
+                print(f"[CoquiTTS] Reusing cached engine for model: {model_name}")
+            engine = _coqui_model_cache[model_name]
+        else:
+            if verbose:
+                print(f"[CoquiTTS] Loading model: {model_name}")
+            engine = _load_coqui_engine(model_name, verbose=verbose)
+            if engine is None:
+                return False
+            _coqui_model_cache[model_name] = engine
+
+        lang = _map_to_coqui_language(output_lang)
+
+        if reference_audio is not None:
+            import io
+            import wave as _wave
+
+            ref_float = reference_audio.astype(np.float32)
+            if ref_float.max() > 1.0 or ref_float.min() < -1.0:
+                ref_float = ref_float / 32768.0
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as ref_fp:
+                ref_fp_path = ref_fp.name
+
+            try:
+                wav_buffer = io.BytesIO()
+                with _wave.open(wav_buffer, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(reference_sample_rate)
+                    wf.writeframes(
+                        np.clip(ref_float * 32767, -32768, 32767).astype(np.int16).tobytes()
+                    )
+                with open(ref_fp_path, "wb") as ref_out:
+                    ref_out.write(wav_buffer.getvalue())
+
+                if verbose:
+                    print(f"[CoquiTTS] Synthesizing with voice cloning (lang={lang})...")
+
+                if getattr(engine, "is_multi_lingual", False):
+                    engine.tts_to_file(
+                        text=text,
+                        speaker_wav=ref_fp_path,
+                        language=lang,
+                        file_path=output_wav,
+                    )
+                else:
+                    engine.tts_to_file(
+                        text=text,
+                        speaker_wav=ref_fp_path,
+                        file_path=output_wav,
+                    )
+            finally:
+                import builtins
+                if os.path.exists(ref_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(ref_fp_path)
+
+        else:
+            if verbose:
+                print(f"[CoquiTTS] Synthesizing (lang={lang})...")
+            if getattr(engine, "is_multi_lingual", False):
+                engine.tts_to_file(
+                    text=text,
+                    language=lang,
+                    file_path=output_wav,
+                )
+            else:
+                engine.tts_to_file(
+                    text=text,
+                    file_path=output_wav,
+                )
+
+        if verbose:
+            print(f"[CoquiTTS] ✓ Synthesis successful, saved to {output_wav}")
+        return True
+
+    except Exception as exc:
+        print(f"[CoquiTTS][ERROR] TTS exception: {exc}")
+        return False
+
+
 def play_output(translated_text, lang="en", play_audio=True, wav_file=None, rate=16000, voice_backend="gtts", voice_model=None):
     use_piper = voice_backend == "piper"
     piper_voice = voice_model
@@ -947,10 +1201,12 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
     use_custom = voice_backend == "custom"
     use_fish = voice_backend == "fish"
     use_indextts = voice_backend == "indextts"
+    use_coqui = voice_backend == "coqui"
     piper_voice = voice_model
     custom_model = voice_model
     fish_model = voice_model
     indextts_model = voice_model
+    coqui_model = voice_model
     lang_base = (output_lang or "en").split("-")[0].split("_")[0].lower()
     
     if not translated_text:
@@ -1059,6 +1315,60 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if verbose:
                     print(f"[TTS] IndexTTS synthesis failed: {indextts_exc}")
                 use_indextts = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
+        # Coqui TTS backend (coqui-tts / XTTS v2)
+        if use_coqui:
+            if verbose:
+                print(f"[TTS] Using Coqui (coqui-tts) backend")
+
+            # Replace non-coqui model identifiers with the default XTTS v2 model
+            if not coqui_model or not coqui_model.startswith("tts_models/"):
+                if verbose and coqui_model:
+                    print(f"[TTS] Replacing non-coqui model '{coqui_model}' with default coqui model")
+                coqui_model = _COQUI_DEFAULT_MODEL
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                coqui_success = coqui_tts(
+                    translated_text,
+                    coqui_model,
+                    output_lang,
+                    tts_fp_path,
+                    verbose=verbose,
+                )
+                if coqui_success:
+                    if verbose:
+                        print(f"[TTS] Coqui result: SUCCESS (model={coqui_model})")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if not audio_data.size:
+                        if verbose:
+                            print(f"[TTS] Coqui result: no data")
+                        use_coqui = False
+                    else:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                            if not audio_data.size:
+                                if verbose:
+                                    print(f"[TTS] librosa resample result: no data")
+                                use_coqui = False
+                        if use_coqui and audio_data.size:
+                            tts_pcm = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Coqui synthesis complete: {len(tts_pcm)} samples")
+                            return tts_pcm
+                else:
+                    if verbose:
+                        print(f"[TTS] Coqui TTS failed, falling back to gTTS")
+                    use_coqui = False
+            except Exception as coqui_exc:
+                if verbose:
+                    print(f"[TTS] Coqui synthesis failed: {coqui_exc}")
+                use_coqui = False
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
@@ -1205,7 +1515,7 @@ def synthesize_tts_pcm(translated_text, rate, output_lang, voice_backend="gtts",
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
                     os.remove(tts_fp_path)
 
-        if not use_piper and not use_custom and not use_fish and not use_indextts:
+        if not use_piper and not use_custom and not use_fish and not use_indextts and not use_coqui:
             if not _ensure_gtts_available(verbose=verbose):
                 return None
             tts_lang = lang_base
@@ -1286,16 +1596,18 @@ def synthesize_tts_pcm_with_cloning(
     reference_text : str or None
         Transcript of reference audio (improves voice cloning quality for custom backend)
     voice_backend : str
-        TTS backend to use: ``"piper"``, ``"gtts"``, ``"custom"``, ``"fish"``, or ``"indextts"`` (default: ``"gtts"``)
+        TTS backend to use: ``"piper"``, ``"gtts"``, ``"custom"``, ``"fish"``, ``"indextts"``, or ``"coqui"`` (default: ``"gtts"``)
     voice_model : str or None
         Voice model name for TTS (used as the Piper voice when ``voice_backend`` is ``"piper"``,
         the Qwen3-TTS model when ``voice_backend`` is ``"custom"``, the fish-speech model
-        when ``voice_backend`` is ``"fish"``, or the IndexTTS model when ``voice_backend`` is ``"indextts"``)
+        when ``voice_backend`` is ``"fish"``, the IndexTTS model when ``voice_backend`` is ``"indextts"``,
+        or the coqui-tts model when ``voice_backend`` is ``"coqui"``)
     voice_match : bool
         Auto-select Piper voice based on input voice features (for piper backend),
         use voice cloning with reference audio (for custom backend),
         perform zero-shot voice cloning (for fish backend),
-        or clone speaker voice from reference audio (for indextts backend)
+        clone speaker voice from reference audio (for indextts backend),
+        or perform zero-shot voice cloning with coqui-tts (for coqui backend)
     verbose : bool
         Print debug information
     
@@ -1319,6 +1631,9 @@ def synthesize_tts_pcm_with_cloning(
 
     For indextts backend with voice_match, voice cloning is performed using
     the reference audio as the speaker prompt.
+
+    For coqui backend with voice_match, zero-shot voice cloning is performed
+    using the reference audio as the speaker prompt (XTTS v2).
     """ 
   
     
@@ -1326,10 +1641,12 @@ def synthesize_tts_pcm_with_cloning(
     use_custom = voice_backend == "custom"
     use_fish = voice_backend == "fish"
     use_indextts = voice_backend == "indextts"
+    use_coqui = voice_backend == "coqui"
     piper_voice = voice_model
     custom_model = voice_model
     fish_model = voice_model
     indextts_model = voice_model
+    coqui_model = voice_model
 
     if not translated_text:
         return None
@@ -1444,6 +1761,61 @@ def synthesize_tts_pcm_with_cloning(
                     print(f"[TTS] IndexTTS voice cloning failed: {indextts_exc}")
                     print("==========================================")
                 use_indextts = False
+            finally:
+                import builtins
+                if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
+                    os.remove(tts_fp_path)
+
+        # Coqui backend with voice matching uses XTTS v2 zero-shot voice cloning
+        if use_coqui and voice_match and reference_audio is not None:
+            if verbose:
+                print("==========================================")
+                print("COQUI VOICE CLONING (--voice-match)")
+                print("==========================================")
+                print(f"Using reference audio for zero-shot voice cloning with coqui-tts XTTS v2")
+
+            if not coqui_model or not coqui_model.startswith("tts_models/"):
+                if verbose and coqui_model:
+                    print(f"[TTS] Replacing non-coqui model '{coqui_model}' with default coqui model")
+                coqui_model = _COQUI_DEFAULT_MODEL
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tts_fp:
+                tts_fp_path = tts_fp.name
+            try:
+                coqui_success = coqui_tts(
+                    translated_text,
+                    coqui_model,
+                    output_lang,
+                    tts_fp_path,
+                    reference_audio=reference_audio,
+                    reference_sample_rate=reference_sample_rate,
+                    verbose=verbose,
+                )
+
+                if coqui_success:
+                    if verbose:
+                        print(f"[TTS] Coqui voice cloning result: SUCCESS")
+                    audio_data, sr = sf.read(tts_fp_path)
+                    if audio_data.size:
+                        if sr != rate:
+                            audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=rate)
+                        if audio_data.size:
+                            tts_pcm = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
+                            if verbose:
+                                print(f"[TTS] Coqui voice cloning complete: {len(tts_pcm)} samples")
+                                print("==========================================")
+                            return tts_pcm
+
+                if verbose:
+                    print(f"[TTS] Coqui voice cloning failed, falling back to standard synthesis")
+                    print("==========================================")
+                use_coqui = False
+
+            except Exception as coqui_exc:
+                if verbose:
+                    print(f"[TTS] Coqui voice cloning failed: {coqui_exc}")
+                    print("==========================================")
+                use_coqui = False
             finally:
                 import builtins
                 if os.path.exists(tts_fp_path) and not getattr(builtins, "KEEP_TEMP", False):
@@ -1603,8 +1975,11 @@ def synthesize_tts_pcm_with_cloning(
                         print(f"[TTS] Auto-selected {output_lang} Piper voice: {lang_voice} (language-aware selection)")
                     piper_voice = lang_voice
 
-        # Standard TTS synthesis (IndexTTS, Fish, Piper, Custom, or gTTS)
-        if use_indextts:
+        # Standard TTS synthesis (Coqui, IndexTTS, Fish, Piper, Custom, or gTTS)
+        if use_coqui:
+            backend = "coqui"
+            model = coqui_model if (coqui_model and coqui_model.startswith("tts_models/")) else _COQUI_DEFAULT_MODEL
+        elif use_indextts:
             backend = "indextts"
             model = indextts_model if (indextts_model and "/" in indextts_model) else _INDEXTTS_DEFAULT_MODEL
         elif use_fish:
