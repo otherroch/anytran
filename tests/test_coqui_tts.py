@@ -130,6 +130,51 @@ def test_coqui_tts_without_reference_audio(tmp_path, monkeypatch):
     assert output_wav.exists()
 
 
+def test_coqui_tts_without_reference_audio_multi_speaker_uses_default(tmp_path, monkeypatch):
+    """coqui_tts passes the first available speaker when the engine is multi-speaker
+    and no reference_audio is provided (fixes 'Neither speaker_wav nor speaker_id
+    was specified' error for XTTS v2 without --voice-match)."""
+    import soundfile as sf
+
+    output_wav = tmp_path / "output.wav"
+    received_kwargs = {}
+
+    class FakeMultiSpeakerEngine:
+        is_multi_lingual = True
+        speakers = ["Claribel Dervla", "Daisy Studious", "Gracie Wise"]
+
+        def tts_to_file(self, text, file_path, language=None, speaker=None, **kwargs):
+            received_kwargs["speaker"] = speaker
+            received_kwargs["language"] = language
+            audio = np.zeros(22050, dtype=np.float32)
+            sf.write(file_path, audio, 22050)
+
+        def to(self, device):
+            return self
+
+    def fake_load_engine(model_name, verbose=False):
+        return FakeMultiSpeakerEngine()
+
+    monkeypatch.setattr(tts, "COQUI_TTS_AVAILABLE", True)
+    monkeypatch.setattr(tts, "_coqui_model_cache", {})
+    monkeypatch.setattr(tts, "_load_coqui_engine", fake_load_engine)
+
+    result = tts.coqui_tts(
+        "Bonjour le monde",
+        tts._COQUI_DEFAULT_MODEL,
+        "fr",
+        str(output_wav),
+        reference_audio=None,
+        verbose=False,
+    )
+
+    assert result is True
+    assert output_wav.exists()
+    # The first built-in speaker must have been forwarded to tts_to_file
+    assert received_kwargs.get("speaker") == "Claribel Dervla"
+    assert received_kwargs.get("language") == "fr"
+
+
 # ---------------------------------------------------------------------------
 # coqui_tts – with reference audio (voice cloning)
 # ---------------------------------------------------------------------------
