@@ -169,6 +169,25 @@ These options save or output the translated text (or re-output if `output-lang` 
 
 ---
 
+## Input Voice Capture
+
+### `--capture-voice <file>`
+- **Type**: File path with audio extension (`.wav`, `.mp3`)
+- **Available for**: All real-time input sources (`--rtsp`, `--from-output`, `--youtube-url`, `--web`)
+- **Not available with**: `--input` (file-input already gives direct access to the source audio)
+- **Behavior**: Records the raw incoming audio stream to a file on disk. Audio is captured before any windowing, overlap, or processing, so the saved file is an accurate copy of the original input.
+- **Multi-RTSP**: When multiple `--rtsp` URLs are given, each stream is saved to a separate file with a `_stream{N}` suffix (e.g. `--capture-voice captured.wav` → `captured_stream1.wav`, `captured_stream2.wav`, …).
+- **Web server**: Each WebSocket client session saves to a unique timestamped file (e.g. `captured_1710000000000.wav`) to avoid overwrites when clients reconnect.
+- **Output format**: 16 kHz mono PCM, same sample rate used internally for transcription
+- **Typical use**: Debugging, replay, or archiving the original input alongside the translated output
+- **Example**:
+  ```bash
+  anytran --rtsp rtsp://camera/stream --scribe-text out.txt --capture-voice input.wav
+  anytran --youtube-url https://... --youtube-api-key KEY --scribe-text out.txt --capture-voice captured.wav
+  ```
+
+---
+
 ## Scribe Options (Speech-to-Text / Stage 1 Configuration)
 
 ### `--scribe-backend <name>`

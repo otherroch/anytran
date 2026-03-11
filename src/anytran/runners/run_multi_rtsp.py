@@ -113,12 +113,12 @@ def run_multi_rtsp(
             while not stop_event.is_set():
                 try:
                     audio_chunk = audio_queue.get(timeout=1)
+                    if local_capture_voice_segments is not None:
+                        local_capture_voice_segments.append(audio_chunk.copy())
                     buffer = np.concatenate([buffer, audio_chunk])
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
                         buffer = buffer[chunk - overlap :]
-                        if local_capture_voice_segments is not None:
-                            local_capture_voice_segments.append(audio_segment.copy())
                         result = process_audio_chunk(
                             audio_segment,
                             rate,

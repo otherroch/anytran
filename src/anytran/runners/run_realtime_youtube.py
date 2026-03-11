@@ -166,12 +166,12 @@ def run_realtime_youtube(
                 queue_timeout = QUEUE_TIMEOUT_DRAIN if stop_flag.is_set() else QUEUE_TIMEOUT_NORMAL
                 audio_chunk = audio_queue.get(timeout=queue_timeout)
                 idle_seconds = 0
+                if capture_voice_segments is not None:
+                    capture_voice_segments.append(audio_chunk.copy())
                 buffer = np.concatenate([buffer, audio_chunk])
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    if capture_voice_segments is not None:
-                        capture_voice_segments.append(audio_segment.copy())
                     result = process_audio_chunk(
                         audio_segment,
                         rate,

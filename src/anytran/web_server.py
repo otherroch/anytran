@@ -487,6 +487,12 @@ def run_web_server(
             timers = True
         timing_stats = TimingsAggregator("web") if timers else None
         capture_voice_segments = [] if capture_voice_path else None
+        # Generate a unique path per session to avoid overwrites when multiple clients connect.
+        session_capture_path = None
+        if capture_voice_path:
+            import time as _time
+            base, ext = os.path.splitext(capture_voice_path)
+            session_capture_path = f"{base}_{int(_time.time() * 1000)}{ext}"
 
         def normalize_web_input_lang(value):
             if value is None:
@@ -526,12 +532,12 @@ def run_web_server(
                     continue
                 data = message["bytes"]
                 audio_np = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                if capture_voice_segments is not None:
+                    capture_voice_segments.append(audio_np.copy())
                 buffer = np.concatenate([buffer, audio_np])
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    if capture_voice_segments is not None:
-                        capture_voice_segments.append(audio_segment.copy())
                     slate_tts_segments = None
                     scribe_tts_segments = None
                     if voice_backend != "auto":   # handle voice backend on the client
@@ -659,11 +665,11 @@ def run_web_server(
                 pass
         finally:
             # text_file removed
-            if capture_voice_segments is not None and len(capture_voice_segments) > 0:
+            if capture_voice_segments is not None and len(capture_voice_segments) > 0 and session_capture_path:
                 all_audio = np.concatenate(capture_voice_segments)
                 try:
-                    output_audio(all_audio, capture_voice_path, play=False)
-                    print(f"Captured input voice saved: {capture_voice_path}", flush=True)
+                    output_audio(all_audio, session_capture_path, play=False)
+                    print(f"Captured input voice saved: {session_capture_path}", flush=True)
                 except Exception as exc:
                     print(f"Error saving captured input voice: {exc}", flush=True)
             if timing_stats is not None:
