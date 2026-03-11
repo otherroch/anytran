@@ -57,6 +57,7 @@ def run_realtime_rtsp(
     dedup=False,
     lang_prefix=False,
     normalize=True,
+    capture_voice_path=None,
 ):
     print("Starting real-time RTSP audio translation...")
     print(f"Input language: {input_lang}, Output language: {output_lang}")
@@ -67,6 +68,8 @@ def run_realtime_rtsp(
         print(f"Stage 1 (English) text will be saved to: {scribe_text_file}")
     if slate_text_file:
         print(f"Stage 2 (translated) text will be saved to: {slate_text_file}")
+    if capture_voice_path:
+        print(f"Original input voice will be saved to: {capture_voice_path}")
     if mqtt_broker:
         print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}, topic: {mqtt_topic}")
     print("Press Ctrl+C to stop.")
@@ -101,6 +104,7 @@ def run_realtime_rtsp(
     slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
     scribe_audio_segments = [] if output_audio_path else None
     slate_audio_segments = [] if slate_audio_path else None
+    capture_voice_segments = [] if capture_voice_path else None
 
     # Deduplication tracking for dual text output
     last_scribe_output = None
@@ -121,6 +125,8 @@ def run_realtime_rtsp(
         while not stop_flag.is_set():
             try:
                 audio_chunk = audio_queue.get(timeout=1)
+                if capture_voice_segments is not None:
+                    capture_voice_segments.append(audio_chunk.copy())
                 buffer = np.concatenate([buffer, audio_chunk])
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
@@ -227,6 +233,17 @@ def run_realtime_rtsp(
                     print(f"Slate audio file saved: {slate_audio_path}", flush=True)
                 except Exception as exc:
                     print(f"Error saving slate audio file: {exc}", flush=True)
+                    import traceback
+
+                    traceback.print_exc()
+        if capture_voice_segments is not None:
+            if len(capture_voice_segments) > 0:
+                all_audio = np.concatenate(capture_voice_segments)
+                try:
+                    output_audio(all_audio, capture_voice_path, play=False)
+                    print(f"Captured input voice saved: {capture_voice_path}", flush=True)
+                except Exception as exc:
+                    print(f"Error saving captured input voice: {exc}", flush=True)
                     import traceback
 
                     traceback.print_exc()

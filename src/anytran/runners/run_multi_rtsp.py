@@ -47,6 +47,7 @@ def run_multi_rtsp(
     dedup=False,
     lang_prefix=False,
     normalize=True,
+    capture_voice_path=None,
 ):
     print(f"Starting {len(rtsp_urls)} RTSP streams...")
 
@@ -99,6 +100,7 @@ def run_multi_rtsp(
         chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
         local_scribe_audio_segments = [] if output_audio_path else None
         local_slate_audio_segments = [] if slate_audio_path else None
+        local_capture_voice_segments = [] if capture_voice_path else None
         rtsp_ip = extract_ip_from_rtsp_url(rtsp_url) if chat_logger else None
         if chat_logger and rtsp_ip:
             print(f"[Stream {idx}] RTSP IP: {rtsp_ip}")
@@ -111,6 +113,8 @@ def run_multi_rtsp(
             while not stop_event.is_set():
                 try:
                     audio_chunk = audio_queue.get(timeout=1)
+                    if local_capture_voice_segments is not None:
+                        local_capture_voice_segments.append(audio_chunk.copy())
                     buffer = np.concatenate([buffer, audio_chunk])
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
@@ -221,6 +225,18 @@ def run_multi_rtsp(
                             print(f"[Stream {idx}] Error saving slate audio file: {exc}", flush=True)
                             import traceback
                             traceback.print_exc()
+            if local_capture_voice_segments is not None:
+                if len(local_capture_voice_segments) > 0:
+                    all_audio = np.concatenate(local_capture_voice_segments)
+                    parts = capture_voice_path.rsplit('.', 1)
+                    output_file = f"{parts[0]}_stream{idx}.{parts[1]}" if len(parts) == 2 else f"{capture_voice_path}_stream{idx}"
+                    try:
+                        output_audio(all_audio, output_file, play=False)
+                        print(f"[Stream {idx}] Captured input voice saved to {output_file}", flush=True)
+                    except Exception as exc:
+                        print(f"[Stream {idx}] Error saving captured input voice: {exc}", flush=True)
+                        import traceback
+                        traceback.print_exc()
 
     threads = []
     for i, url in enumerate(rtsp_urls):
@@ -240,8 +256,6 @@ def run_multi_rtsp(
     finally:
         if chat_logger:
             chat_logger.close()
-        if text_file:
-            text_file.close()
         if scribe_file:
             scribe_file.close()
             print(f"Scribe text file saved: {scribe_text_file}", flush=True)

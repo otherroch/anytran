@@ -123,6 +123,9 @@ Examples:
     # Stage 2 outputs (Translation to output-lang, only if output-lang != en)
     parser.add_argument("--slate-text", type=str, help="Save translation to text file")
     parser.add_argument("--slate-voice", type=str, help="Save translated voice output as audio file")
+
+    # Capture original input voice (all inputs except --input)
+    parser.add_argument("--capture-voice", type=str, help="Save the original input audio to a file (not supported with --input)")
     
     # Scribe (Speech-to-Text) options
     scribe_group = parser.add_argument_group("scribe options (speech-to-text / Stage 1)")
@@ -479,6 +482,10 @@ def _validate_pipeline_args(args, parser):
     # Input validation
     if args.input and not os.path.exists(args.input):
         parser.error(f"Input file not found: {args.input}")
+    
+    # --capture-voice is not compatible with --input (file input already has the source)
+    if getattr(args, "capture_voice", None) and args.input:
+        parser.error("--capture-voice cannot be used with --input")
     
     # Check if input is text file (Stage 1 skips voice transcription)
     if args.input and args.input.endswith('.txt'):

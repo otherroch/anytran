@@ -11,6 +11,7 @@ from .mqtt_client import init_mqtt
 from .processing import process_audio_chunk
 from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
+from .audio_io import output_audio
 
 def _serialize_tts_segments(segments, rate):
     """Serialize PCM segments for websocket delivery."""
@@ -55,6 +56,7 @@ def run_web_server(
     voice_backend=None,
     voice_model=None,
     voice_match=False,
+    capture_voice_path=None,
 ):
     """
     Start the real-time translation web server.
@@ -484,6 +486,13 @@ def run_web_server(
         if timers_all: 
             timers = True
         timing_stats = TimingsAggregator("web") if timers else None
+        capture_voice_segments = [] if capture_voice_path else None
+        # Generate a unique path per session to avoid overwrites when multiple clients connect.
+        session_capture_path = None
+        if capture_voice_path:
+            import time as _time
+            base, ext = os.path.splitext(capture_voice_path)
+            session_capture_path = f"{base}_{int(_time.time() * 1000)}{ext}"
 
         def normalize_web_input_lang(value):
             if value is None:
@@ -523,6 +532,8 @@ def run_web_server(
                     continue
                 data = message["bytes"]
                 audio_np = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                if capture_voice_segments is not None:
+                    capture_voice_segments.append(audio_np.copy())
                 buffer = np.concatenate([buffer, audio_np])
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
@@ -654,6 +665,13 @@ def run_web_server(
                 pass
         finally:
             # text_file removed
+            if capture_voice_segments is not None and len(capture_voice_segments) > 0 and session_capture_path:
+                all_audio = np.concatenate(capture_voice_segments)
+                try:
+                    output_audio(all_audio, session_capture_path, play=False)
+                    print(f"Captured input voice saved: {session_capture_path}", flush=True)
+                except Exception as exc:
+                    print(f"Error saving captured input voice: {exc}", flush=True)
             if timing_stats is not None:
                 backend = get_whisper_backend()
                 if backend == "faster-whisper":
