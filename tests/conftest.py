@@ -46,6 +46,7 @@ import anytran.tts  # noqa: F401
 import anytran.chatlog  # noqa: F401
 import anytran.certs  # noqa: F401
 import anytran.stream_youtube  # noqa: F401 — prevent test_looptran.py from stubbing it
+import anytran.stream_output  # noqa: F401
 
 # Pre-import web_server (and its transitive deps: processing, mqtt_client)
 # so that test_looptran.py's stubs can't replace them.
@@ -79,6 +80,7 @@ import anytran.utils as _anytran_utils_module
 import anytran.whisper_backend as _anytran_wb_module
 import anytran.certs as _anytran_certs_module
 import anytran.web_server as _anytran_web_server_module
+import anytran.stream_output as _anytran_stream_output_module
 
 _real_certs_funcs = {
     "generate_self_signed_cert": _anytran_certs_module.generate_self_signed_cert,
@@ -92,6 +94,9 @@ _real_text_translator_funcs = {
         "translate_text",
         "set_translation_backend",
         "get_translation_backend",
+        "set_translategemma_config",
+        "set_metanllb_config",
+        "set_marianmt_config",
         "translate_text_googletrans",
         "translate_text_libretranslate",
     )
@@ -100,6 +105,12 @@ _real_text_translator_funcs = {
 _real_web_server_funcs = {
     "run_web_server": _anytran_web_server_module.run_web_server,
     "_serialize_tts_segments": _anytran_web_server_module._serialize_tts_segments,
+}
+
+_real_stream_output_funcs = {
+    "get_wasapi_loopback_device_info": _anytran_stream_output_module.get_wasapi_loopback_device_info,
+    "list_wasapi_loopback_devices": _anytran_stream_output_module.list_wasapi_loopback_devices,
+    "stream_output_audio": _anytran_stream_output_module.stream_output_audio,
 }
 
 _real_whisper_backend_funcs = {
