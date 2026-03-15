@@ -539,3 +539,81 @@ def test_capture_voice_not_called_when_path_is_none(monkeypatch, tmp_path, runne
     rro.run_realtime_output(capture_voice_path=None)
 
     assert output_calls == []
+
+
+def test_run_file_input_same_lang_skips_stage2_translation(monkeypatch, tmp_path, runner_modules):
+    """When input_lang == text_translation_target, Stage 2 translation is skipped
+    and the original input text is written directly to the slate file."""
+    rfi, _, _, _, _ = runner_modules
+    original_text = "bonjour. au revoir"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(original_text, encoding="utf-8")
+
+    translate_calls = []
+
+    def fake_translate_text(text, source_lang=None, target_lang=None, backend=None, verbose=False):
+        translate_calls.append((text, source_lang, target_lang))
+        return f"{target_lang}:{text}"
+
+    def fake_split(text):
+        return [p.strip() for p in text.split(".") if p.strip()]
+
+    monkeypatch.setattr(rfi, "translate_text", fake_translate_text)
+    monkeypatch.setattr(rfi, "split_into_sentences", fake_split)
+    monkeypatch.setattr(rfi, "normalize_text", lambda t: t)
+
+    scribe_text_file = tmp_path / "scribe.txt"
+    slate_text_file = tmp_path / "slate.txt"
+
+    rfi.run_file_input(
+        str(input_path),
+        input_lang="fr",
+        text_translation_target="fr",
+        slate_backend="googletrans",
+        scribe_text_file=str(scribe_text_file),
+        slate_text_file=str(slate_text_file),
+        verbose=True,
+    )
+
+    # Stage 1 should still run (fr -> en) for the scribe, but Stage 2 should be skipped.
+    stage2_calls = [c for c in translate_calls if c[2] == "fr"]
+    assert stage2_calls == [], "Stage 2 (en->fr) translation should be skipped when input_lang == target_lang"
+
+    # Slate should contain the original French text, not a round-trip translation.
+    slate_content = slate_text_file.read_text(encoding="utf-8").strip()
+    assert slate_content == original_text.strip()
+
+
+def test_run_file_input_same_lang_with_dialect_skips_stage2_translation(monkeypatch, tmp_path, runner_modules):
+    """When input_lang and text_translation_target share the same base language code
+    (e.g. 'zh-CN' vs 'zh'), Stage 2 translation is still skipped."""
+    rfi, _, _, _, _ = runner_modules
+    original_text = "你好世界"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(original_text, encoding="utf-8")
+
+    translate_calls = []
+
+    def fake_translate_text(text, source_lang=None, target_lang=None, backend=None, verbose=False):
+        translate_calls.append((text, source_lang, target_lang))
+        return f"{target_lang}:{text}"
+
+    monkeypatch.setattr(rfi, "translate_text", fake_translate_text)
+    monkeypatch.setattr(rfi, "split_into_sentences", lambda t: [t])
+    monkeypatch.setattr(rfi, "normalize_text", lambda t: t)
+
+    slate_text_file = tmp_path / "slate_zh.txt"
+
+    rfi.run_file_input(
+        str(input_path),
+        input_lang="zh-CN",
+        text_translation_target="zh",
+        slate_backend="googletrans",
+        slate_text_file=str(slate_text_file),
+    )
+
+    stage2_calls = [c for c in translate_calls if c[1] == "en"]
+    assert stage2_calls == [], "Stage 2 translation should be skipped when base language codes match"
+
+    slate_content = slate_text_file.read_text(encoding="utf-8").strip()
+    assert slate_content == original_text.strip()

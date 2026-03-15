@@ -218,61 +218,78 @@ def run_file_input(
         if text_translation_target and text_translation_target.lower().split("-")[0] != "en":
             if timings:
                 t6 = time.perf_counter()
-            if verbose:
-                print(f"Translating text from English to {text_translation_target} for Stage 2...")
-            if batch > 0:
-                # Split English text into sentences for Stage 2 batching
-                sentences = split_into_sentences(english_text)
-                translated_sentences = []
-                for i in range(0, len(sentences), batch):
-                    batch_group = sentences[i:i+batch]
-                    batch_text = ' '.join(batch_group)
-                    if verbose:
-                        print(f"Batching sentences {i+1}-{i+len(batch_group)} for translation, total length: {len(batch_text)}")
-                    translated = translate_text(
-                        batch_text,
-                        source_lang="en",
-                        target_lang=text_translation_target,
-                        backend=slate_backend,
-                        verbose=verbose,
+            # Optimization: if the input is already in the target language, skip
+            # the round-trip translation (input_lang → English → input_lang) and
+            # use the original text directly as the slate output.
+            input_base = input_lang.lower().split("-")[0] if input_lang else None
+            target_base = text_translation_target.lower().split("-")[0]
+            if input_base and input_base == target_base:
+                if verbose:
+                    print(
+                        f"Input language matches target language ({text_translation_target}), "
+                        "skipping Stage 2 translation and using original text directly."
                     )
-                    if not translated:
-                        print(f"Error: Failed to batch translate sentences {i+1}-{i+len(batch_group)}.")
-                        translated_sentences.extend(batch_group)
-                    else:
-                        # Split translated batch into sentences
-                        batch_translated = split_into_sentences(translated)
-                        for sentence in batch_translated:
-                            if sentence.strip():
-                                translated_sentences.append(sentence.strip())
-                translated = ' '.join(translated_sentences)
-            else:
-                # Split English text into sentences for Stage 2 if not batching
-                sentences = split_into_sentences(english_text)
-                translated_sentences = []
-                for idx, sent in enumerate(sentences):
-                    translated_sent = translate_text(
-                        sent,
-                        source_lang="en",
-                        target_lang=text_translation_target,
-                        backend=slate_backend,
-                        verbose=verbose,
-                    )
-                    if not translated_sent:
-                        print(f"Error: Failed to translate sentence {idx+1}: {sent}")
-                        continue
-                    translated_sentences.append(translated_sent)
-                translated = ' '.join(translated_sentences)
-
-            if timings:
-                add_timing(timings, "stage2_translation", t6)
-
-            if translated:
-                final_text = translated
+                if timings:
+                    add_timing(timings, "stage2_translation", t6)
+                final_text = text
                 final_lang = text_translation_target
                 stage2_ran = True
+            else:
                 if verbose:
-                    print(f"Stage 2 (English -> {text_translation_target}) len: {len(final_text)}")
+                    print(f"Translating text from English to {text_translation_target} for Stage 2...")
+                if batch > 0:
+                    # Split English text into sentences for Stage 2 batching
+                    sentences = split_into_sentences(english_text)
+                    translated_sentences = []
+                    for i in range(0, len(sentences), batch):
+                        batch_group = sentences[i:i+batch]
+                        batch_text = ' '.join(batch_group)
+                        if verbose:
+                            print(f"Batching sentences {i+1}-{i+len(batch_group)} for translation, total length: {len(batch_text)}")
+                        translated = translate_text(
+                            batch_text,
+                            source_lang="en",
+                            target_lang=text_translation_target,
+                            backend=slate_backend,
+                            verbose=verbose,
+                        )
+                        if not translated:
+                            print(f"Error: Failed to batch translate sentences {i+1}-{i+len(batch_group)}.")
+                            translated_sentences.extend(batch_group)
+                        else:
+                            # Split translated batch into sentences
+                            batch_translated = split_into_sentences(translated)
+                            for sentence in batch_translated:
+                                if sentence.strip():
+                                    translated_sentences.append(sentence.strip())
+                    translated = ' '.join(translated_sentences)
+                else:
+                    # Split English text into sentences for Stage 2 if not batching
+                    sentences = split_into_sentences(english_text)
+                    translated_sentences = []
+                    for idx, sent in enumerate(sentences):
+                        translated_sent = translate_text(
+                            sent,
+                            source_lang="en",
+                            target_lang=text_translation_target,
+                            backend=slate_backend,
+                            verbose=verbose,
+                        )
+                        if not translated_sent:
+                            print(f"Error: Failed to translate sentence {idx+1}: {sent}")
+                            continue
+                        translated_sentences.append(translated_sent)
+                    translated = ' '.join(translated_sentences)
+
+                if timings:
+                    add_timing(timings, "stage2_translation", t6)
+
+                if translated:
+                    final_text = translated
+                    final_lang = text_translation_target
+                    stage2_ran = True
+                    if verbose:
+                        print(f"Stage 2 (English -> {text_translation_target}) len: {len(final_text)}")
 
         
         # Write to slate file if provided, but avoid duplicating unchanged English text
