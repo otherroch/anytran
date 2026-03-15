@@ -320,6 +320,31 @@ Stage 2 runs text translation if `--output-lang` ≠ `en`.
   - GPU strongly recommended for `translategemma` and `metanllb`
   - See [TRANSLATEGEMMA_SETUP.md](TRANSLATEGEMMA_SETUP.md) for `translategemma` setup
 
+### `--slate-no-opt` / `--slate-opt`
+- **Type**: Boolean flag (inverted pair)
+- **Default**: Optimizations **enabled** (i.e., `--slate-no-opt` is off by default)
+- **Purpose**: Control whether slate translation shortcuts are applied
+- **Behavior**: By default two optimizations are active:
+  1. **Direct non-English translation** — When `--input-lang` and `--output-lang` are both
+     non-English (and differ), and no English scribe output is requested
+     (`--scribe-text` / `--output-audio-path` not set), the text is translated directly
+     `input_lang → output_lang` in a single step instead of the usual two-step
+     `input_lang → English → output_lang` pivot.  This reduces latency and improves
+     translation quality for non-English language pairs.
+  2. **Same-language pass-through** — When `--input-lang` already matches
+     `--output-lang` (or both resolve to the same language), Stage 2 is skipped
+     entirely and the original text is used as-is.
+- Pass `--slate-no-opt` to disable both shortcuts and force the full
+  `input_lang → English → output_lang` round-trip in all cases (useful for
+  debugging or comparing translation quality).
+- Pass `--slate-opt` to re-enable the optimizations (e.g., to override a config
+  file that sets `slate_no_opt: true`).
+- **Interactions**:
+  - Only relevant when Stage 2 translation is active (`--output-lang` ≠ `en`)
+  - Has no effect when `--slate-backend none` is used
+  - When the direct-translation shortcut fires, Stage 1 output (`--scribe-text`)
+    is not produced because no English intermediate text is generated
+
 ---
 
 ## Voice Options (Text-to-Speech / Stage 3 Configuration)
@@ -922,6 +947,7 @@ CLI arguments always take precedence over config file values, so `--no-flag` can
 | `--dedup` | `--no-dedup` | Disabled |
 | `--norm` | `--no-norm` | Enabled (normalization on) |
 | `--input-norm` | `--no-input-norm` | Enabled (input normalization on) |
+| `--slate-opt` | `--slate-no-opt` | Enabled (optimizations on) |
 
 ### `--no-input-norm`
 - **Type**: Boolean flag
