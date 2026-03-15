@@ -352,6 +352,7 @@ Examples:
         "--slate-opt",
         action="store_false",
         dest="slate_no_opt",
+        default=False,
         help="Enable slate translation optimizations (default)",
     )
 
