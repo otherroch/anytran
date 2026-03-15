@@ -122,13 +122,8 @@ def run_file_input(
             # English output (scribe text/audio) is needed, translate directly input_lang → target_lang
             # instead of the two-step input_lang → English → target_lang pivot.
             # Disabled by slate_no_opt=True.
-            # Additionally, only enable this optimization for backends that reliably support
-            # arbitrary non-English → non-English language pairs (e.g. "googletrans"). For
-            # model-based backends that may lack specific pairs (such as MarianMT-like setups),
-            # always fall back to the safer English pivot to avoid mismatched output language.
             use_direct_translation = (
                 not slate_no_opt
-                and slate_backend == "googletrans"
                 and target_base_check
                 and target_base_check != "en"
                 and target_base_check != input_base_check
