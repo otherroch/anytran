@@ -111,7 +111,7 @@ def run_file_input(
             print("Error: Input text file is empty.")
             return
 
-        english_text = text
+        stage1_text = text
         direct_translation_done = False
 
 
@@ -220,7 +220,7 @@ def run_file_input(
             if use_direct_translation:
                 direct_translation_done = True
 
-        # Write Stage 1 (English) to scribe file, prefixing each sentence
+        # Write Stage 1 text to scribe file (English when applicable), prefixing each sentence
         if scribe_file and english_text:
             if timings:
                 t3 = time.perf_counter()
