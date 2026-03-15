@@ -310,8 +310,13 @@ class TestFileInputText(unittest.TestCase):
     @patch("anytran.runners.run_file_input.send_mqtt_text")
     @patch("anytran.runners.run_file_input.output_audio")
     def test_text_file_translation(self, mock_output_audio, mock_send, mock_play, mock_tts, mock_translate_text):
-        """Translating a French .txt file writes Spanish output to slate_text_file."""
-        mock_translate_text.side_effect = ["hello", "hola"]
+        """Translating a French .txt file writes Spanish output to slate_text_file.
+
+        With the direct-translation optimization, when no scribe output is requested
+        (scribe_text_file=None, output_audio_path=None), a single fr→es call is made
+        instead of the two-step fr→en→es round-trip.
+        """
+        mock_translate_text.side_effect = ["hola"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")
@@ -361,8 +366,12 @@ class TestFileInputText(unittest.TestCase):
     @patch("anytran.runners.run_file_input.send_mqtt_text")
     @patch("anytran.runners.run_file_input.output_audio")
     def test_text_file_translation_no_prefix(self, mock_output_audio, mock_send, mock_play, mock_tts, mock_translate_text):
-        """Without lang_prefix the slate_text_file contains plain translated text."""
-        mock_translate_text.side_effect = ["hello", "hola"]
+        """Without lang_prefix the slate_text_file contains plain translated text.
+
+        With the direct-translation optimization, when no scribe output is requested,
+        a single fr→es call is made (no English pivot).
+        """
+        mock_translate_text.side_effect = ["hola"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")
@@ -514,8 +523,12 @@ class TestScribeSlateOutput(unittest.TestCase):
 
     @patch("anytran.runners.run_file_input.translate_text")
     def test_slate_file_gets_translated_text(self, mock_translate_text):
-        """slate_text_file receives the translated (Stage-2) text."""
-        mock_translate_text.side_effect = ["hello", "hola"]
+        """slate_text_file receives the translated text.
+
+        With the direct-translation optimization, when scribe_text_file and
+        output_audio_path are both None, a single fr→es call is made (no English pivot).
+        """
+        mock_translate_text.side_effect = ["hola"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")

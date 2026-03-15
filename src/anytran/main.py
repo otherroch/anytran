@@ -333,6 +333,28 @@ Examples:
         default=False,
         help="Enable normalization of the input text file before processing (default)",
     )
+    parser.add_argument(
+        "--slate-no-opt",
+        action="store_true",
+        dest="slate_no_opt",
+        default=False,
+        help=(
+            "Disable slate translation optimizations. By default two shortcuts are applied: "
+            "(1) when input_lang and target_lang are both non-English and no English scribe "
+            "output is requested, the translation goes directly input_lang → target_lang "
+            "instead of the two-step input_lang → English → target_lang pivot; "
+            "(2) when input_lang already matches target_lang, Stage 2 is skipped entirely "
+            "and the original text is used as-is. Pass this flag to force the full "
+            "translation round-trip (input_lang → English → target_lang) in all cases."
+        ),
+    )
+    parser.add_argument(
+        "--slate-opt",
+        action="store_false",
+        dest="slate_no_opt",
+        default=False,
+        help="Enable slate translation optimizations (default)",
+    )
 
     # Voice table generation options
     voice_table_group = parser.add_argument_group("voice table generation options")

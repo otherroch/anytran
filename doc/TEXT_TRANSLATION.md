@@ -9,6 +9,20 @@ The pipeline now supports:
 2. **Text Translation** (NEW) - Translate English text to another language
 3. **Text-to-Speech** (optional) - Generate voice output in the target language
 
+### Non-English to Non-English Translation
+
+When both `--input-lang` and `--output-lang` are non-English (e.g. `fr → es`), anytran
+automatically takes a **direct translation** path instead of the usual two-step English
+pivot (`fr → en → es`):
+
+- **Single call**: one translation request goes directly from the input language to the
+  target language, reducing latency and improving quality.
+- **Condition**: active when no English intermediate output is needed — i.e. neither
+  `--scribe-text` nor `--output-audio-path` is set, so there is no consumer for the
+  English text.
+- **Disable**: pass `--slate-no-opt` to force the full round-trip for debugging or
+  quality comparison.
+
 ## Performance
 
 The translation backends are designed for performance:
@@ -244,6 +258,8 @@ Browse all available models at: https://huggingface.co/Helsinki-NLP
 --slate-model MODEL                # MetaNLLB model name (default: facebook/nllb-200-1.3B)
 --slate-model MODEL                # MarianMT model name (default: Helsinki-NLP/opus-mt-en-ROMANCE)
 --voice-lang LANG                   # Override TTS language (optional)
+--slate-no-opt                      # Disable translation shortcuts (force full pivot through English)
+--slate-opt                         # Re-enable translation shortcuts (default; overrides config file)
 ```
 
 ### TTS Language Override
