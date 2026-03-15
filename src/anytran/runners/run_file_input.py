@@ -48,6 +48,7 @@ def run_file_input(
     lang_prefix=False,
     batch=0,
     normalize=True,
+    slate_no_opt=False,
 ):
     print("Starting file input processing...")
     if keep_temp:
@@ -221,9 +222,10 @@ def run_file_input(
             # Optimization: if the input is already in the target language, skip
             # the round-trip translation (input_lang → English → input_lang) and
             # use the original text directly as the slate output.
+            # This can be disabled with slate_no_opt=True.
             input_base = input_lang.lower().split("-")[0] if input_lang else None
             target_base = text_translation_target.lower().split("-")[0]
-            if input_base and input_base == target_base:
+            if not slate_no_opt and input_base and input_base == target_base:
                 if verbose:
                     print(
                         f"Input language matches target language ({text_translation_target}), "

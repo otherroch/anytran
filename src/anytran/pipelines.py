@@ -71,6 +71,7 @@ def build_pipeline_config(args):
         "lang_prefix": getattr(args, "lang_prefix", False),
         "normalize": not getattr(args, "no_norm", False),
         "normalize_input": not getattr(args, "no_input_norm", False),
+        "slate_no_opt": getattr(args, "slate_no_opt", False),
 
         # Capture original input voice
         "capture_voice": getattr(args, "capture_voice", None),
@@ -394,6 +395,7 @@ def _run_file_pipeline(args, config):
         lang_prefix=config["lang_prefix"],
         batch=args.batch_input_text,
         normalize=config.get("normalize", True),
+        slate_no_opt=config.get("slate_no_opt", False),
     )
 
     if input_is_temp_file and not keep_temp:    
@@ -478,6 +480,7 @@ def _run_file_pipeline(args, config):
                 lang_prefix=config["lang_prefix"],
                 batch=args.batch_input_text,
                 normalize=config.get("normalize", True),
+                slate_no_opt=config.get("slate_no_opt", False),
             )
 
             output_slate_paths.append(new_slate_text)

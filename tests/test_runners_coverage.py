@@ -617,3 +617,43 @@ def test_run_file_input_same_lang_with_dialect_skips_stage2_translation(monkeypa
 
     slate_content = slate_text_file.read_text(encoding="utf-8").strip()
     assert slate_content == original_text.strip()
+
+
+def test_run_file_input_slate_no_opt_forces_stage2_translation(monkeypatch, tmp_path, runner_modules):
+    """When slate_no_opt=True, Stage 2 translation runs even if input_lang == text_translation_target."""
+    rfi, _, _, _, _ = runner_modules
+    original_text = "bonjour. au revoir"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(original_text, encoding="utf-8")
+
+    translate_calls = []
+
+    def fake_translate_text(text, source_lang=None, target_lang=None, backend=None, verbose=False):
+        translate_calls.append((text, source_lang, target_lang))
+        return f"{target_lang}:{text}"
+
+    def fake_split(text):
+        return [p.strip() for p in text.split(".") if p.strip()]
+
+    monkeypatch.setattr(rfi, "translate_text", fake_translate_text)
+    monkeypatch.setattr(rfi, "split_into_sentences", fake_split)
+    monkeypatch.setattr(rfi, "normalize_text", lambda t: t)
+
+    slate_text_file = tmp_path / "slate.txt"
+
+    rfi.run_file_input(
+        str(input_path),
+        input_lang="fr",
+        text_translation_target="fr",
+        slate_backend="googletrans",
+        slate_text_file=str(slate_text_file),
+        slate_no_opt=True,
+    )
+
+    # With slate_no_opt=True the round-trip must happen: fr→en (Stage 1) then en→fr (Stage 2).
+    stage2_calls = [c for c in translate_calls if c[2] == "fr"]
+    assert len(stage2_calls) > 0, "Stage 2 (en->fr) translation should run when slate_no_opt=True"
+
+    # Slate output should be the Stage-2 translated text, not the raw original.
+    slate_content = slate_text_file.read_text(encoding="utf-8").strip()
+    assert slate_content != original_text.strip(), "Slate content should differ from original when opt is disabled"
