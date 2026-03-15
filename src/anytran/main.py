@@ -339,17 +339,20 @@ Examples:
         dest="slate_no_opt",
         default=False,
         help=(
-            "Disable the same-language slate optimization. By default, when the input language "
-            "matches the target (slate) language, Stage 2 translation is skipped and the original "
-            "input text is used directly. Pass this flag to force the full translation round-trip "
-            "(input_lang → English → target_lang) even when both languages are the same."
+            "Disable slate translation optimizations. By default two shortcuts are applied: "
+            "(1) when input_lang and target_lang are both non-English and no English scribe "
+            "output is requested, the translation goes directly input_lang → target_lang "
+            "instead of the two-step input_lang → English → target_lang pivot; "
+            "(2) when input_lang already matches target_lang, Stage 2 is skipped entirely "
+            "and the original text is used as-is. Pass this flag to force the full "
+            "translation round-trip (input_lang → English → target_lang) in all cases."
         ),
     )
     parser.add_argument(
         "--slate-opt",
         action="store_false",
         dest="slate_no_opt",
-        help="Enable the same-language slate optimization (default)",
+        help="Enable slate translation optimizations (default)",
     )
 
     # Voice table generation options
