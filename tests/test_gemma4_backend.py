@@ -93,7 +93,7 @@ class TestGemma4ScribeBackendDispatch(unittest.TestCase):
     def test_translate_audio_dispatches_to_gemma4(self):
         """translate_audio should call translate_audio_gemma4 when backend is gemma4."""
         audio = np.zeros(16000, dtype=np.float32)
-        with patch("anytran.whisper_backend.translate_audio_gemma4", return_value=(audio, "hello", "en")) as mock:
+        with patch("anytran.gemma4_backend.translate_audio_gemma4", return_value=(audio, "hello", "en")) as mock:
             from anytran.whisper_backend import translate_audio
             result = translate_audio(
                 audio, samplerate=16000, backend_preference="gemma4"

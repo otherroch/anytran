@@ -7,7 +7,8 @@ from .timing import add_timing, format_timing
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
 from .utils import normalize_lang_code
 from .vad import SILERO_AVAILABLE, has_speech_silero
-from .whisper_backend import translate_audio, translate_audio_gemma4_combined
+from .whisper_backend import translate_audio
+from .gemma4_backend import translate_audio_gemma4_combined
 from .config import get_gemma4_config
 
 
