@@ -72,6 +72,8 @@ _real_config_funcs = {
         "set_whisper_ctranslate2_config",
         "get_whisper_ctranslate2_config",
         "_parse_whisper_ctranslate2_device_index",
+        "set_gemma4_config",
+        "get_gemma4_config",
     )
 }
 
@@ -97,6 +99,7 @@ _real_text_translator_funcs = {
         "set_translategemma_config",
         "set_metanllb_config",
         "set_marianmt_config",
+        "set_gemma4_text_config",
         "translate_text_googletrans",
         "translate_text_libretranslate",
     )

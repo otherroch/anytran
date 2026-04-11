@@ -50,9 +50,10 @@ from .config import (
     set_whispercpp_cli_detect_lang,
     set_whispercpp_force_cli,
     set_whisper_ctranslate2_config,
+    set_gemma4_config,
 )
 from .stream_output import list_wasapi_loopback_devices
-from .text_translator import set_translation_backend, set_libretranslate_config, set_translategemma_config, set_metanllb_config, set_marianmt_config
+from .text_translator import set_translation_backend, set_libretranslate_config, set_translategemma_config, set_metanllb_config, set_marianmt_config, set_gemma4_text_config
 from .utils import resolve_path_with_fallback
 from .vad import SILERO_AVAILABLE
 from .pipelines import build_pipeline_config, execute_pipeline
@@ -133,8 +134,8 @@ Examples:
         "--scribe-backend",
         type=str,
         default="faster-whisper",
-        choices=["whispercpp", "whispercpp-cli", "faster-whisper", "whisper-ctranslate2"],
-        help="Whisper backend (default: faster-whisper). Use 'whispercpp-cli' for CLI-based inference."
+        choices=["whispercpp", "whispercpp-cli", "faster-whisper", "whisper-ctranslate2", "gemma4"],
+        help="Whisper backend (default: faster-whisper). Use 'whispercpp-cli' for CLI-based inference. Use 'gemma4' for Gemma 4 multimodal transcription."
     )
     scribe_group.add_argument("--scribe-model", type=str, default=os.environ.get("WHISPERCPP_MODEL_NAME", "medium"), help="Whisper model name or path (default: WHISPERCPP_MODEL_NAME env var or 'medium'). For whispercpp: model name like 'small', 'medium', or full path to .bin file. For other backends: model name or path.")
     scribe_group.add_argument("--scribe-vad", action="store_true", help="Use Silero VAD for speech detection")
@@ -159,7 +160,7 @@ Examples:
     
     # Slate (Text Translation) options
     slate_group = parser.add_argument_group("slate options (text translation / Stage 2)")
-    slate_group.add_argument("--slate-backend", type=str, default="googletrans", choices=["googletrans", "libretranslate", "translategemma", "metanllb", "marianmt", "none"], help="Text translation backend (default: googletrans)")
+    slate_group.add_argument("--slate-backend", type=str, default="googletrans", choices=["googletrans", "libretranslate", "translategemma", "metanllb", "marianmt", "gemma4", "none"], help="Text translation backend (default: googletrans). Use 'gemma4' for Gemma 4 text-to-text translation.")
     slate_group.add_argument("--slate-model", type=str, default=None, help="Translation model name (used with --slate-backend translategemma/metanllb/marianmt). Default depends on backend: translategemma=google/translategemma-12b-it, metanllb=facebook/nllb-200-1.3B, marianmt=auto-derived from language pair)")
     slate_group.add_argument("--libretranslate-url", type=str, help="LibreTranslate API URL")
     
@@ -572,6 +573,8 @@ def _configure_backends(args):
             set_metanllb_config(args.slate_model or "facebook/nllb-200-1.3B")
         elif args.slate_backend == "marianmt":
             set_marianmt_config(args.slate_model)
+        elif args.slate_backend == "gemma4":
+            set_gemma4_text_config(args.slate_model or "google/gemma-4-E4B-it")
     
     # Skip Whisper backend configuration for text file inputs
     if is_text_input:
@@ -594,6 +597,10 @@ def _configure_backends(args):
     # Configure whisper-ctranslate2
     if args.scribe_backend == "whisper-ctranslate2":
         _configure_whisper_ctranslate2(args)
+    
+    # Configure gemma4 scribe backend
+    if args.scribe_backend == "gemma4":
+        set_gemma4_config(args.scribe_model if args.scribe_model != "medium" else None)
 
 
 def _configure_whispercpp(args):

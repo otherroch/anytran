@@ -7,7 +7,8 @@ from .timing import add_timing, format_timing
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
 from .utils import normalize_lang_code
 from .vad import SILERO_AVAILABLE, has_speech_silero
-from .whisper_backend import translate_audio
+from .whisper_backend import translate_audio, translate_audio_gemma4_combined
+from .config import get_gemma4_config
 
 
 def build_output_prefix(stream_id=None, detected_lang=None):
@@ -240,7 +241,7 @@ def process_audio_chunk(
     # ============================================================================
     # STAGE 1: VOICE TRANSCRIPTION TO ENGLISH TEXT
     # ============================================================================
-    # Uses Whisper backend (whispercpp, faster-whisper, or whisper-ctranslate2)
+    # Uses Whisper backend (whispercpp, faster-whisper, whisper-ctranslate2, or gemma4)
     # to transcribe/translate audio to English text.
     # Output: english_text (Stage 1 result)
     
@@ -257,34 +258,84 @@ def process_audio_chunk(
             print(f"{prefix}  - Original input_lang: {input_lang}")
             print(f"{prefix}  - Using for Whisper: None (auto-detect)")
     
-    if verbose:
-        print(f"{prefix}Stage 1 (Whisper Transcription): Starting")
-        print(f"{prefix}  - Input language hint: {stage1_input_lang or 'auto-detect'}")
-        print(f"{prefix}  - Output language: {output_lang or 'en'}")
-        print(f"{prefix}  - Backend: {scribe_backend}")
-    
-    model_name = model if model else "medium"
-    t0 = time.perf_counter()
-    output_audio_data, english_text, detected_lang = translate_audio(
-        audio_segment,
-        rate,
-        stage1_input_lang,  # Use potentially modified input_lang
-        output_lang,
-        model=model_name,
-        backend_preference=scribe_backend,
-        verbose=verbose,
-        timers=timers,
-        timing_stats=timing_stats,
-    )
-    add_timing(timings, "stage1_transcription", t0)
-    
-    if not english_text:
-        return None
-    
-    if verbose:
-        print(f"{prefix}Stage 1 (Transcription): '{english_text}'")
-        print(f"{prefix}  - Detected language: {detected_lang}")
-        print(f"{prefix}  - Transcription complete")
+    # ========================================================================
+    # GEMMA4 COMBINED ONE-PASS OPTIMIZATION
+    # ========================================================================
+    # When both scribe and slate backends are gemma4 using the same model,
+    # perform transcription + translation in a single inference pass so the
+    # English pivot is not required.
+    gemma4_one_pass = False
+    if (
+        scribe_backend == "gemma4"
+        and slate_backend == "gemma4"
+        and text_translation_target
+        and text_translation_target.lower().split("-")[0] != "en"
+        and not langswap_enabled
+    ):
+        scribe_model_name = model if model and model != "medium" else None
+        gemma4_cfg = get_gemma4_config()
+        scribe_effective = scribe_model_name or gemma4_cfg.get("model_name", "google/gemma-4-E4B-it")
+
+        from .text_translator import _gemma4_text_model_name
+        slate_effective = _gemma4_text_model_name
+
+        if scribe_effective == slate_effective:
+            gemma4_one_pass = True
+            if verbose:
+                print(f"{prefix}Gemma4 one-pass: scribe and slate share model '{scribe_effective}'")
+                print(f"{prefix}  -> Transcribing and translating to {text_translation_target} in a single pass")
+
+            model_name = model if model and model != "medium" else None
+            t0 = time.perf_counter()
+            output_audio_data, combined_text, detected_lang = translate_audio_gemma4_combined(
+                audio_segment,
+                samplerate=rate,
+                input_lang=stage1_input_lang,
+                output_lang=text_translation_target,
+                model_name=model_name,
+                verbose=verbose,
+                timers=timers,
+                timing_stats=timing_stats,
+            )
+            add_timing(timings, "stage1_transcription", t0)
+
+            if not combined_text:
+                return None
+
+            english_text = combined_text
+            if verbose:
+                print(f"{prefix}Gemma4 one-pass result: '{combined_text}'")
+                print(f"{prefix}  - Detected language hint: {detected_lang}")
+
+    if not gemma4_one_pass:
+        if verbose:
+            print(f"{prefix}Stage 1 (Whisper Transcription): Starting")
+            print(f"{prefix}  - Input language hint: {stage1_input_lang or 'auto-detect'}")
+            print(f"{prefix}  - Output language: {output_lang or 'en'}")
+            print(f"{prefix}  - Backend: {scribe_backend}")
+        
+        model_name = model if model else "medium"
+        t0 = time.perf_counter()
+        output_audio_data, english_text, detected_lang = translate_audio(
+            audio_segment,
+            rate,
+            stage1_input_lang,  # Use potentially modified input_lang
+            output_lang,
+            model=model_name,
+            backend_preference=scribe_backend,
+            verbose=verbose,
+            timers=timers,
+            timing_stats=timing_stats,
+        )
+        add_timing(timings, "stage1_transcription", t0)
+        
+        if not english_text:
+            return None
+        
+        if verbose:
+            print(f"{prefix}Stage 1 (Transcription): '{english_text}'")
+            print(f"{prefix}  - Detected language: {detected_lang}")
+            print(f"{prefix}  - Transcription complete")
 
     # ============================================================================
     # LANGSWAP: AUTOMATIC LANGUAGE DETECTION AND TARGET SWITCHING
@@ -350,6 +401,7 @@ def process_audio_chunk(
     # STAGE 2: TEXT-TO-TEXT TRANSLATION (English → Target Language)
     # ============================================================================
     # Only runs if text_translation_target is specified and is not English.
+    # Skipped when gemma4 one-pass already produced the translated text.
     # Uses googletrans, LibreTranslate, or DeepL for translation.
     # Output: translated_text (Stage 2 result), or english_text if Stage 2 skipped
     
@@ -358,7 +410,13 @@ def process_audio_chunk(
     
     prefix = f"[Stream {stream_id}] " if stream_id else ""
     
-    if text_translation_target and text_translation_target.lower().split("-")[0] != "en":
+    if gemma4_one_pass:
+        # One-pass already produced the final translated text
+        translated_text = english_text
+        stage2_ran = True
+        if verbose:
+            print(f"{prefix}Stage 2 (Translation): SKIPPED - handled by Gemma4 one-pass")
+    elif text_translation_target and text_translation_target.lower().split("-")[0] != "en":
         if verbose:
             print(f"{prefix}Stage 2 (Text Translation): Preparing to translate")
             print(f"{prefix}  - Source text: '{english_text}'")

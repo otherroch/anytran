@@ -70,6 +70,10 @@ _marianmt_tokenizer = None  # Cached MarianMT tokenizer
 _marianmt_model_name = None  # If None, auto-derive from language pair as Helsinki-NLP/opus-mt-{src}-{tgt}
 _marianmt_loaded_model_name = None  # Track which model name is currently loaded
 
+_gemma4_text_model = None  # Cached Gemma4 model for text-to-text translation
+_gemma4_text_processor = None  # Cached Gemma4 processor
+_gemma4_text_model_name = "google/gemma-4-E4B-it"  # Default Gemma4 model
+
 # Mapping from common ISO 639-1 language codes to FLORES-200 codes used by NLLB
 _NLLB_LANG_MAP = {
     "af": "afr_Latn",
@@ -180,6 +184,12 @@ def set_marianmt_config(model_name: str):
     """Set MarianMT model name."""
     global _marianmt_model_name
     _marianmt_model_name = model_name
+
+
+def set_gemma4_text_config(model_name: str):
+    """Set Gemma4 text-to-text translation model name."""
+    global _gemma4_text_model_name
+    _gemma4_text_model_name = model_name
 
 
 def _get_googletrans_translator():
@@ -702,6 +712,104 @@ def translate_text_marianmt(text: str, source_lang: str, target_lang: str, verbo
         return None
 
 
+# ---------------------------------------------------------------------------
+# Gemma4 text-to-text translation backend
+# ---------------------------------------------------------------------------
+
+
+def _get_gemma4_text_model(verbose=False):
+    """Load and cache the Gemma4 model and processor for text translation."""
+    global _gemma4_text_model, _gemma4_text_processor
+
+    if not _TRANSFORMERS_AVAILABLE or not _TORCH_AVAILABLE:
+        raise ImportError(
+            "Gemma4 requires transformers and torch. "
+            "Install with: pip install transformers torch accelerate"
+        )
+    if _gemma4_text_model is not None and _gemma4_text_processor is not None:
+        return _gemma4_text_model, _gemma4_text_processor
+
+    model_name = _gemma4_text_model_name
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if verbose:
+        print(f"Gemma4-text: Loading processor '{model_name}' on device '{device}'")
+    _gemma4_text_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    if verbose:
+        print(f"Gemma4-text: Loading model '{model_name}' on device '{device}'")
+    _gemma4_text_model = AutoModelForImageTextToText.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        trust_remote_code=True,
+    )
+    if device == "cpu":
+        _gemma4_text_model = _gemma4_text_model.to(device)
+    _gemma4_text_model.eval()
+    if verbose:
+        print(f"Gemma4-text: Loaded model '{model_name}' on device '{_gemma4_text_model.device}'")
+    return _gemma4_text_model, _gemma4_text_processor
+
+
+def translate_text_gemma4(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    verbose: bool = False,
+) -> Optional[str]:
+    """Translate text using a Gemma4 multimodal model (text-to-text).
+
+    Args:
+        text: Text to translate.
+        source_lang: Source language code.
+        target_lang: Target language code.
+        verbose: Print debug information.
+
+    Returns:
+        Translated text or ``None`` on failure.
+    """
+    try:
+        model, processor = _get_gemma4_text_model(verbose=verbose)
+
+        prompt_text = f"Translate the following text from {source_lang} to {target_lang}:\n{text}"
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt_text}],
+            }
+        ]
+        if verbose:
+            print(f"Gemma4-text: Translating '{text[:30]}' from {source_lang} to {target_lang}...")
+
+        inputs = processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            add_generation_prompt=True,
+        ).to(model.device)
+        input_len = inputs["input_ids"].shape[-1]
+
+        with torch.inference_mode():
+            generation = model.generate(**inputs, max_new_tokens=1000, do_sample=False)
+        generation = generation[0][input_len:]
+        translated = processor.decode(generation, skip_special_tokens=True).strip()
+
+        if verbose and translated:
+            short_text = (text[:30] + "...") if len(text) > 30 else text
+            short_translated = (translated[:30] + "...") if len(translated) > 30 else translated
+            print(f"Gemma4-text: '{short_text}' -> '{short_translated}' ({source_lang}->{target_lang})")
+
+        return translated
+    except ImportError as e:
+        if verbose:
+            print(f"Gemma4 dependencies not installed: {e}")
+        return None
+    except Exception as exc:
+        if verbose:
+            print(f"Gemma4 text translation failed: {exc}")
+        return None
+
+
 
 def translate_text(
     text: str,
@@ -744,6 +852,8 @@ def translate_text(
         return translate_text_metanllb(text, source_lang, target_lang, verbose)
     elif backend_to_use == "marianmt":
         return translate_text_marianmt(text, source_lang, target_lang, verbose)
+    elif backend_to_use == "gemma4":
+        return translate_text_gemma4(text, source_lang, target_lang, verbose)
     else:
         if verbose:
             print(f"Unknown translation backend: {backend_to_use}")
@@ -758,4 +868,5 @@ __all__ = [
     "set_translategemma_config",
     "set_metanllb_config",
     "set_marianmt_config",
+    "set_gemma4_text_config",
 ]

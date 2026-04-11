@@ -120,3 +120,28 @@ def set_whisper_ctranslate2_config(model_name=None, device=None, device_index=No
 
 def get_whisper_ctranslate2_config():
     return dict(_whisper_ctranslate2_config)
+
+
+# ---------------------------------------------------------------------------
+# Gemma4 configuration
+# ---------------------------------------------------------------------------
+
+DEFAULT_GEMMA4_MODEL = os.environ.get("GEMMA4_MODEL", "google/gemma-4-E4B-it")
+
+_gemma4_config = {
+    "model_name": DEFAULT_GEMMA4_MODEL,
+}
+
+
+def set_gemma4_config(model_name=None):
+    """Update the configuration for the Gemma4 backend.
+
+    :param model_name: HuggingFace model identifier (e.g.
+        ``"google/gemma-4-E4B-it"``).  If ``None`` the existing value is kept.
+    """
+    if model_name is not None:
+        _gemma4_config["model_name"] = model_name
+
+
+def get_gemma4_config():
+    return dict(_gemma4_config)
