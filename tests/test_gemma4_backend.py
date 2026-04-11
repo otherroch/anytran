@@ -111,14 +111,7 @@ class TestGemma4CLIChoices(unittest.TestCase):
     def _get_parser_choices(self, dest):
         """Return the choices set for a given argument dest."""
         import argparse
-        import io
-        import sys
 
-        # Build the parser as main() does, but only extract the choices
-        from anytran.main import main as _main_func  # ensure module loads
-        import anytran.main as main_mod
-
-        # We can inspect the parser by re-creating a minimal version
         parser = argparse.ArgumentParser()
         scribe_group = parser.add_argument_group("scribe")
         scribe_group.add_argument("--scribe-backend", type=str, choices=[

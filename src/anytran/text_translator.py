@@ -736,6 +736,8 @@ def _get_gemma4_text_model(verbose=False):
     _gemma4_text_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
     if verbose:
         print(f"Gemma4-text: Loading model '{model_name}' on device '{device}'")
+    # Gemma4 registers as AutoModelForImageTextToText in HuggingFace even
+    # though it supports text-only inputs as well (multimodal architecture).
     _gemma4_text_model = AutoModelForImageTextToText.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
