@@ -99,6 +99,144 @@ class TestCleanGemma4Output(unittest.TestCase):
         result = _clean_gemma4_output(text, prompt_text=prompt)
         self.assertEqual(result, "Nous sommes arrivés à Windsor tôt.")
 
+    # -------------------------------------------------------------------
+    # Translated prompt echo detection
+    # -------------------------------------------------------------------
+
+    def test_strips_french_prompt_echo(self):
+        """Catches French translation of the English instruction prompt."""
+        text = (
+            "Écoutez ceci et traduisez-le en français.\n"
+            "Nous avons décidé de visiter Londres."
+        )
+        self.assertEqual(
+            _clean_gemma4_output(text),
+            "Nous avons décidé de visiter Londres.",
+        )
+
+    def test_strips_repeated_french_prompt_echoes(self):
+        """Multiple translated echoes scattered through the output."""
+        text = (
+            "Écoutez ceci et traduisez-le en français.\n"
+            "Pourquoi ne pas aller à Londres en février?\n"
+            "Écoutez ceci et traduisez-le en français.\n"
+            "Le lendemain, nous avons passé la journée à visiter."
+        )
+        result = _clean_gemma4_output(text)
+        self.assertEqual(
+            result,
+            "Pourquoi ne pas aller à Londres en février?\n"
+            "Le lendemain, nous avons passé la journée à visiter.",
+        )
+
+    def test_strips_spanish_prompt_echo(self):
+        """Catches Spanish translation of the instruction prompt."""
+        text = "Escucha esto y tradúcelo al español.\nHola mundo."
+        self.assertEqual(_clean_gemma4_output(text), "Hola mundo.")
+
+    def test_strips_german_prompt_echo(self):
+        """Catches German translation of the instruction prompt."""
+        text = "Hören Sie sich das an und übersetzen Sie es auf Deutsch.\nHallo Welt."
+        self.assertEqual(_clean_gemma4_output(text), "Hallo Welt.")
+
+    def test_strips_italian_prompt_echo(self):
+        """Catches Italian translation of the instruction prompt."""
+        text = "Ascolta questo e traducilo in italiano.\nCiao mondo."
+        self.assertEqual(_clean_gemma4_output(text), "Ciao mondo.")
+
+    def test_strips_translate_audio_pattern(self):
+        """Catches 'translate the audio' pattern."""
+        text = "Traduisez l'audio en français.\nBonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour le monde.")
+
+    def test_strips_transcribe_audio_pattern(self):
+        """Catches 'transcribe this audio' pattern."""
+        text = "Transcribe this audio.\nHello world."
+        self.assertEqual(_clean_gemma4_output(text), "Hello world.")
+
+    def test_strips_meta_instruction_output_only(self):
+        """Catches 'output only the translation' meta-instruction leak."""
+        text = "Output only the translated text.\nBonjour."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_meta_instruction_reply_with(self):
+        """Catches 'reply with only the translation' meta-instruction leak."""
+        text = "Reply with only the translation.\nBonjour."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_do_not_repeat_leak(self):
+        """Catches 'do not repeat these instructions' meta-instruction leak."""
+        text = "Do not repeat these instructions.\nBonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour le monde.")
+
+    # -------------------------------------------------------------------
+    # Translated apology detection
+    # -------------------------------------------------------------------
+
+    def test_strips_french_apology_desole(self):
+        """Catches French 'désolé... écouter l'audio' apology."""
+        text = (
+            "Bonjour, je suis désolé, je n'ai pas pu écouter l'audio.\n"
+            "Nous avons visité le château."
+        )
+        self.assertEqual(
+            _clean_gemma4_output(text),
+            "Nous avons visité le château.",
+        )
+
+    def test_strips_french_apology_pas_pu(self):
+        """Catches French 'pas pu transcrire' apology."""
+        text = "Je n'ai pas pu transcrire cet audio.\nBonjour."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_spanish_apology(self):
+        """Catches Spanish apology about audio."""
+        text = "Lo siento, no pude escuchar el audio.\nHola mundo."
+        self.assertEqual(_clean_gemma4_output(text), "Hola mundo.")
+
+    def test_strips_german_apology(self):
+        """Catches German apology about audio."""
+        text = "Es tut mir leid, ich kann nicht das Audio transkribieren.\nHallo Welt."
+        self.assertEqual(_clean_gemma4_output(text), "Hallo Welt.")
+
+    # -------------------------------------------------------------------
+    # Real-world combined scenario from user report
+    # -------------------------------------------------------------------
+
+    def test_real_world_2b_after_output(self):
+        """Test with output that matches the user-reported 2B model artifacts."""
+        text = (
+            "Écoutez ceci et traduisez-le en français.\n"
+            "Comme nous n'avons pas eu assez de pluie, nous avons décidé\n"
+            "Pourquoi ne pas aller à Londres en février?\n"
+            "Écoutez ceci et traduisez-le en français.\n"
+            "Je suis situé dans le Seven Dials Quarter.\n"
+            "Bonjour, je suis désolé, je n'ai pas pu écouter l'audio.\n"
+            "Écoutez ceci et traduisez-le en français.\n"
+        )
+        result = _clean_gemma4_output(text)
+        self.assertEqual(
+            result,
+            "Comme nous n'avons pas eu assez de pluie, nous avons décidé\n"
+            "Pourquoi ne pas aller à Londres en février?\n"
+            "Je suis situé dans le Seven Dials Quarter.",
+        )
+
+    def test_preserves_content_with_listen_word(self):
+        """Should NOT strip lines that merely mention listening as content."""
+        text = "J'ai écouté la musique hier soir."
+        # This contains "écouté" but no translate verb, so it should be kept
+        self.assertEqual(_clean_gemma4_output(text), "J'ai écouté la musique hier soir.")
+
+    def test_preserves_content_with_translate_word(self):
+        """Should NOT strip lines that mention translation as content."""
+        text = "Le traducteur a traduit le livre en anglais."
+        # Contains "traduit" but no listen/audio verb combo that matches echo
+        self.assertEqual(
+            _clean_gemma4_output(text),
+            "Le traducteur a traduit le livre en anglais.",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Config tests

@@ -189,11 +189,13 @@ Gemma 4 is designed for GPU acceleration. On CPU:
 ### Output Contains Artifacts
 
 If you see prompt echoes, timestamps, or `[Music]` markers in the output, ensure you are running the latest version. The Gemma 4 backend includes post-processing to strip common model artifacts including:
-- Prompt text echoed in the response
+- Prompt text echoed in the response (in English or translated to the target language)
+- Translated instruction echoes (e.g., "Écoutez ceci et traduisez-le en français.")
 - Timestamp markers (e.g., `[ 0m0s311ms - 0m1s211ms ]`)
 - Music/sound markers (e.g., `[Music]`, `[🎵]`)
-- Model apologies (e.g., "I'm unable to transcribe that audio")
+- Model apologies in English and common target languages (e.g., "I'm unable to transcribe that audio", "je suis désolé, je n'ai pas pu écouter l'audio")
 - Formatting labels (e.g., `**French Translation:**`)
+- Meta-instruction leaks (e.g., "Output only the translation")
 
 ### Model Quality
 

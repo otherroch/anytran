@@ -773,8 +773,8 @@ def translate_text_gemma4(
         model, processor = _get_gemma4_text_model(verbose=verbose)
 
         prompt_text = (
-            f"Translate the following text from {source_lang} to {target_lang}. "
-            f"Output only the translation, nothing else.\n\n{text}"
+            f"Translate to {target_lang}. "
+            f"Reply with ONLY the translation, nothing else.\n\n{text}"
         )
         messages = [
             {

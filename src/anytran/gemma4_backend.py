@@ -42,6 +42,61 @@ _LANG_LABEL_RE = re.compile(
     r"^\*{0,2}\s*French\s*:?\s*\*{0,2}\s*:?\s*"
 )
 
+# ---------------------------------------------------------------------------
+# Translated prompt echo detection
+# ---------------------------------------------------------------------------
+# The model sometimes echoes the instruction prompt translated into the target
+# language.  For example, the English prompt "Listen to this audio and translate
+# it to fr" may appear in French as "Écoutez ceci et traduisez-le en français."
+#
+# This pattern catches lines containing BOTH a listen/hear-type verb AND a
+# translate-type verb in the same line (or transcribe/translate + "audio"), in
+# common target languages (en, fr, es, de, it, pt).
+
+_PROMPT_ECHO_RE = re.compile(
+    r"(?:"
+    # [A] listen/hear verb + ... + translate verb (any common language)
+    r"(?:listen|[éè]cout\w*|escuch\w*|ascolt\w*|h[öo]r\w*|ou[çc]\w*)"
+    r".{1,80}"
+    r"(?:translat\w*|tradui\w*|trad[uú]c\w*|traduz\w*|[üu]bersetz\w*)"
+    r"|"
+    # [B] translate verb + ... + listen/hear verb (reverse order)
+    r"(?:translat\w*|tradui\w*|trad[uú]c\w*|traduz\w*|[üu]bersetz\w*)"
+    r".{1,80}"
+    r"(?:listen|[éè]cout\w*|escuch\w*|ascolt\w*|h[öo]r\w*|ou[çc]\w*)"
+    r"|"
+    # [C] transcribe + audio
+    r"(?:transcri\w*|transcriv\w*|transkri\w*).{0,40}audio"
+    r"|"
+    # [D] translate + audio
+    r"(?:translat\w*|tradui\w*|trad[uú]c\w*|traduz\w*|[üu]bersetz\w*).{0,40}audio"
+    r"|"
+    # [E] English meta-instruction leak
+    r"(?:output|reply\s+with)\s+only\s+the\s+translat"
+    r"|"
+    r"do\s+not\s+repeat\s+these\s+instructions"
+    r")",
+    re.IGNORECASE,
+)
+
+# Model apology / inability lines in target languages.
+# Catches lines where the model says it cannot listen / transcribe / translate
+# the audio, using common apology patterns across languages.
+_TRANSLATED_APOLOGY_RE = re.compile(
+    r"(?:"
+    # sorry/désolé/lo siento + audio/transcribe/listen
+    r"(?:sorry|d[ée]sol[ée]\w*|lo\s+siento|mi\s+dispiace|tut\s+mir\s+leid|desculp\w*)"
+    r".{0,80}"
+    r"(?:audio|transcri\w*|[ée]cout\w*|escuch\w*|ascolt\w*|h[öo]r\w*|ou[çc]\w*)"
+    r"|"
+    # unable/can't/impossible + transcribe/listen/audio (target languages)
+    r"(?:pas\s+pu|ne\s+p(?:eux|eut|ouvons)\s+pas|unable|impossible|kann\s+nicht|non\s+(?:posso|riesco))"
+    r".{0,60}"
+    r"(?:audio|transcri\w*|[ée]cout\w*|escuch\w*|ascolt\w*|h[öo]r\w*|ou[çc]\w*|tradui\w*|traduc\w*)"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def _clean_gemma4_output(text, prompt_text=None):
     """Post-process raw Gemma4 model output, removing common artifacts.
@@ -79,6 +134,12 @@ def _clean_gemma4_output(text, prompt_text=None):
         if prompt_stripped and stripped == prompt_stripped:
             continue
 
+        # --- skip translated prompt echoes ------------------------------------
+        # Catches the instruction echoed in the target language, e.g.
+        # "Écoutez ceci et traduisez-le en français."
+        if _PROMPT_ECHO_RE.search(stripped):
+            continue
+
         # --- skip timestamp artifacts (possibly followed by prompt echo) -------
         if _TIMESTAMP_RE.search(stripped):
             remainder = _TIMESTAMP_RE.sub("", stripped).strip()
@@ -91,6 +152,10 @@ def _clean_gemma4_output(text, prompt_text=None):
         # --- skip model apology / "unable to transcribe" lines -----------------
         lower = stripped.lower()
         if any(phrase in lower for phrase in _GEMMA4_SKIP_PHRASES):
+            continue
+
+        # --- skip translated apology lines (target language) -------------------
+        if _TRANSLATED_APOLOGY_RE.search(stripped):
             continue
 
         # --- skip pure music / sound markers -----------------------------------
@@ -228,13 +293,13 @@ def translate_audio_gemma4(
     if target.lower() in ("en", "eng"):
         prompt_text = (
             "Transcribe this audio to English text. "
-            "Output only the transcription, without any additional commentary."
+            "Reply with ONLY the transcription, nothing else."
         )
     else:
         prompt_text = (
-            f"Listen to this audio and translate it to {target}. "
-            "Output only the translated text, without the original transcription, "
-            "timestamps, or any formatting."
+            f"Translate the audio to {target}. "
+            "Reply with ONLY the translation. "
+            "Do not repeat these instructions or add any commentary."
         )
 
     messages = [
@@ -336,9 +401,9 @@ def translate_audio_gemma4_combined(
 
     target = output_lang or "en"
     prompt_text = (
-        f"Listen to this audio and translate it to {target}. "
-        "Output only the translated text, without the original transcription, "
-        "timestamps, or any formatting."
+        f"Translate the audio to {target}. "
+        "Reply with ONLY the translation. "
+        "Do not repeat these instructions or add any commentary."
     )
 
     messages = [
