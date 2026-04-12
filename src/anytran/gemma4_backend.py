@@ -1,5 +1,6 @@
 """Gemma4 multimodal backend for audio transcription and combined transcribe+translate."""
 
+import re
 import time
 
 import librosa
@@ -8,6 +9,113 @@ import numpy as np
 from .config import get_gemma4_config
 from .timing import add_timing
 from .whisper_backend import is_hallucination
+
+
+# Phrases indicating the model failed to transcribe or produced an apology
+# rather than actual content.
+_GEMMA4_SKIP_PHRASES = [
+    "unable to transcribe",
+    "i cannot transcribe",
+    "i can't transcribe",
+    "cannot be transcribed",
+    "can't be transcribed",
+    "i'm not able to transcribe",
+]
+
+# Pattern matching timestamp artifacts like "[ 0m0s311ms - 0m1s211ms ]"
+_TIMESTAMP_RE = re.compile(
+    r"\[\s*\d+m\d+s\d+ms\s*-\s*\d+m\d+s\d+ms\s*\]"
+)
+
+# Pattern matching music/sound markers like "[Music]", "[music]", "[ 🎵 ]"
+_MUSIC_MARKER_RE = re.compile(
+    r"^\s*(?:\[[\s🎵♪♫]*(?:music|🎵|♪|♫)[\s🎵♪♫]*\]\s*)+$",
+    re.IGNORECASE,
+)
+
+# Pattern matching formatting labels the model prepends to translations, e.g.
+# "**French Translation:** ...", "French translation: ...", "**French:** ..."
+_LABEL_RE = re.compile(
+    r"^\*{0,2}\s*(?:French\s+)?[Tt]ranslat(?:ion|e)\s*:?\s*\*{0,2}\s*:?\s*"
+)
+_LANG_LABEL_RE = re.compile(
+    r"^\*{0,2}\s*French\s*:?\s*\*{0,2}\s*:?\s*"
+)
+
+
+def _clean_gemma4_output(text, prompt_text=None):
+    """Post-process raw Gemma4 model output, removing common artifacts.
+
+    Handles prompt echoes, timestamp markers, model apology lines,
+    ``[Music]`` markers, and bold formatting labels that the model sometimes
+    injects into its response.
+
+    Parameters
+    ----------
+    text : str or None
+        Raw decoded text from the model.
+    prompt_text : str or None
+        The prompt that was sent to the model, used to detect prompt echoes.
+
+    Returns
+    -------
+    str or None
+        Cleaned text, or ``None`` if nothing useful remains.
+    """
+    if not text:
+        return None
+
+    prompt_stripped = prompt_text.strip() if prompt_text else None
+
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # --- skip prompt echoes ------------------------------------------------
+        if prompt_stripped and stripped == prompt_stripped:
+            continue
+
+        # --- skip timestamp artifacts (possibly followed by prompt echo) -------
+        if _TIMESTAMP_RE.search(stripped):
+            remainder = _TIMESTAMP_RE.sub("", stripped).strip()
+            # If only a timestamp (possibly plus the prompt), skip
+            if not remainder or (prompt_stripped and remainder == prompt_stripped):
+                continue
+            # Otherwise keep the remainder
+            stripped = remainder
+
+        # --- skip model apology / "unable to transcribe" lines -----------------
+        lower = stripped.lower()
+        if any(phrase in lower for phrase in _GEMMA4_SKIP_PHRASES):
+            continue
+
+        # --- skip pure music / sound markers -----------------------------------
+        if _MUSIC_MARKER_RE.match(stripped):
+            continue
+
+        # --- strip inline music markers ----------------------------------------
+        stripped = re.sub(
+            r"\[[\s🎵♪♫]*(?:music|🎵|♪|♫)[\s🎵♪♫]*\]",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        ).strip()
+        if not stripped:
+            continue
+
+        # --- strip formatting labels -------------------------------------------
+        stripped = _LABEL_RE.sub("", stripped).strip()
+        stripped = _LANG_LABEL_RE.sub("", stripped).strip()
+
+        if stripped:
+            cleaned_lines.append(stripped)
+
+    result = "\n".join(cleaned_lines).strip()
+    return result if result else None
 
 _gemma4_model = None
 _gemma4_processor = None
@@ -118,9 +226,16 @@ def translate_audio_gemma4(
     # Build the prompt
     target = output_lang or "en"
     if target.lower() in ("en", "eng"):
-        prompt_text = "Transcribe this audio to English text."
+        prompt_text = (
+            "Transcribe this audio to English text. "
+            "Output only the transcription, without any additional commentary."
+        )
     else:
-        prompt_text = f"Transcribe this audio and translate it to {target}."
+        prompt_text = (
+            f"Listen to this audio and translate it to {target}. "
+            "Output only the translated text, without the original transcription, "
+            "timestamps, or any formatting."
+        )
 
     messages = [
         {
@@ -147,12 +262,16 @@ def translate_audio_gemma4(
     with torch.inference_mode():
         output_ids = model.generate(**inputs, max_new_tokens=512, do_sample=False)
     generation = output_ids[0][input_len:]
-    text = processor.decode(generation, skip_special_tokens=True).strip()
+    raw_text = processor.decode(generation, skip_special_tokens=True).strip()
     add_timing(timings, "generate", t0)
+
+    text = _clean_gemma4_output(raw_text, prompt_text=prompt_text)
 
     detected_lang = input_lang if input_lang and input_lang.lower() != "auto" else None
 
     if verbose:
+        if raw_text != text:
+            print(f"Gemma4 raw output: '{raw_text}'")
         print(f"Gemma4 transcription: '{text}'")
         print(f"Gemma4 detected_lang hint: {detected_lang}")
 
@@ -216,7 +335,11 @@ def translate_audio_gemma4_combined(
     add_timing(timings, "model_load", t0)
 
     target = output_lang or "en"
-    prompt_text = f"Transcribe this audio and translate it to {target}."
+    prompt_text = (
+        f"Listen to this audio and translate it to {target}. "
+        "Output only the translated text, without the original transcription, "
+        "timestamps, or any formatting."
+    )
 
     messages = [
         {
@@ -243,12 +366,16 @@ def translate_audio_gemma4_combined(
     with torch.inference_mode():
         output_ids = model.generate(**inputs, max_new_tokens=512, do_sample=False)
     generation = output_ids[0][input_len:]
-    text = processor.decode(generation, skip_special_tokens=True).strip()
+    raw_text = processor.decode(generation, skip_special_tokens=True).strip()
     add_timing(timings, "generate", t0)
+
+    text = _clean_gemma4_output(raw_text, prompt_text=prompt_text)
 
     detected_lang = input_lang if input_lang and input_lang.lower() != "auto" else None
 
     if verbose:
+        if raw_text != text:
+            print(f"Gemma4 combined raw output ({target}): '{raw_text}'")
         print(f"Gemma4 combined transcription+translation ({target}): '{text}'")
 
     if not text:

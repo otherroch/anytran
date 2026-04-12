@@ -3,6 +3,102 @@ import unittest
 from unittest.mock import patch, MagicMock
 import numpy as np
 
+from anytran.gemma4_backend import _clean_gemma4_output
+
+
+# ---------------------------------------------------------------------------
+# Output cleanup tests
+# ---------------------------------------------------------------------------
+class TestCleanGemma4Output(unittest.TestCase):
+    """Test _clean_gemma4_output strips artifacts from model responses."""
+
+    def test_returns_none_for_empty(self):
+        self.assertIsNone(_clean_gemma4_output(""))
+        self.assertIsNone(_clean_gemma4_output(None))
+
+    def test_strips_prompt_echo(self):
+        prompt = "Transcribe this audio and translate it to fr."
+        text = f"{prompt}\nBonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text, prompt_text=prompt), "Bonjour le monde.")
+
+    def test_strips_prompt_echo_at_end(self):
+        prompt = "Transcribe this audio and translate it to fr."
+        text = f"Bonjour.\n{prompt}"
+        self.assertEqual(_clean_gemma4_output(text, prompt_text=prompt), "Bonjour.")
+
+    def test_strips_timestamp_artifacts(self):
+        text = "[ 0m0s311ms - 0m1s211ms ] Transcribe this audio and translate it to fr.\nBonjour."
+        result = _clean_gemma4_output(text, prompt_text="Transcribe this audio and translate it to fr.")
+        self.assertEqual(result, "Bonjour.")
+
+    def test_strips_pure_timestamp_line(self):
+        text = "[ 0m0s311ms - 0m1s211ms ]\nBonjour."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_unable_to_transcribe(self):
+        text = "Hello, I'm unable to transcribe that audio.\nBonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour le monde.")
+
+    def test_strips_sorry_unable(self):
+        text = "Sorry, I'm unable to transcribe that audio."
+        self.assertIsNone(_clean_gemma4_output(text))
+
+    def test_strips_music_markers(self):
+        text = "[Music]\nBonjour.\n[music] [music]"
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_emoji_music_markers(self):
+        text = "[ 🎵 ]\nBonjour."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour.")
+
+    def test_strips_inline_music_markers(self):
+        text = "[Music] **French:** [Music]"
+        # After stripping music markers and label, nothing or minimal remains
+        result = _clean_gemma4_output(text)
+        # Should be None since nothing useful remains after stripping
+        self.assertIsNone(result)
+
+    def test_strips_formatting_labels(self):
+        text = "**French Translation:** J'étais situé dans le quartier."
+        self.assertEqual(
+            _clean_gemma4_output(text),
+            "J'étais situé dans le quartier.",
+        )
+
+    def test_strips_plain_translation_label(self):
+        text = "French translation: Bonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour le monde.")
+
+    def test_preserves_clean_text(self):
+        text = "Bonjour le monde."
+        self.assertEqual(_clean_gemma4_output(text), "Bonjour le monde.")
+
+    def test_all_artifacts_returns_none(self):
+        text = "[Music]\n[Music] [Music]\n[ 🎵 ]"
+        self.assertIsNone(_clean_gemma4_output(text))
+
+    def test_mixed_real_output_example(self):
+        """Simulate the kind of mixed output from the 4B model."""
+        prompt = "Transcribe this audio and translate it to fr."
+        text = (
+            "Transcribe this audio and translate it to fr.\n"
+            "**French Translation:** Nous avons terminé notre journée avec un.\n"
+            "[Music] [Music]"
+        )
+        result = _clean_gemma4_output(text, prompt_text=prompt)
+        self.assertEqual(result, "Nous avons terminé notre journée avec un.")
+
+    def test_2b_model_artifacts(self):
+        """Simulate 2B model output with timestamps and apologies."""
+        prompt = "Transcribe this audio and translate it to fr."
+        text = (
+            "[ 0m0s311ms - 0m1s211ms ] Transcribe this audio and translate it to fr.\n"
+            "Sorry, I'm unable to transcribe that audio.\n"
+            "Nous sommes arrivés à Windsor tôt."
+        )
+        result = _clean_gemma4_output(text, prompt_text=prompt)
+        self.assertEqual(result, "Nous sommes arrivés à Windsor tôt.")
+
 
 # ---------------------------------------------------------------------------
 # Config tests

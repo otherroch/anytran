@@ -772,7 +772,10 @@ def translate_text_gemma4(
     try:
         model, processor = _get_gemma4_text_model(verbose=verbose)
 
-        prompt_text = f"Translate the following text from {source_lang} to {target_lang}:\n{text}"
+        prompt_text = (
+            f"Translate the following text from {source_lang} to {target_lang}. "
+            f"Output only the translation, nothing else.\n\n{text}"
+        )
         messages = [
             {
                 "role": "user",
@@ -794,7 +797,11 @@ def translate_text_gemma4(
         with torch.inference_mode():
             generation = model.generate(**inputs, max_new_tokens=1000, do_sample=False)
         generation = generation[0][input_len:]
-        translated = processor.decode(generation, skip_special_tokens=True).strip()
+        raw_translated = processor.decode(generation, skip_special_tokens=True).strip()
+
+        # Post-process: strip artifacts the model may inject
+        from .gemma4_backend import _clean_gemma4_output
+        translated = _clean_gemma4_output(raw_translated, prompt_text=prompt_text)
 
         if verbose and translated:
             short_text = (text[:30] + "...") if len(text) > 30 else text
