@@ -69,7 +69,8 @@ For a complete reference of all command line options and how they interact with 
 
 Additional topic guides:
 - [Installation](doc/INSTALLATION.md) — CUDA GPU support, individual feature installs, and Linux system prerequisites
-- [Text Translation Backends](doc/TEXT_TRANSLATION.md) — details on all translation backends (googletrans, libretranslate, MarianMT, MetaNLLB, TranslateGemma)
+- [Text Translation Backends](doc/TEXT_TRANSLATION.md) — details on all translation backends (googletrans, libretranslate, MarianMT, MetaNLLB, TranslateGemma, Gemma 4)
+- [Gemma 4 Setup](doc/GEMMA4_SETUP.md) — guide for using Google's Gemma 4 multimodal model for transcription and translation
 - [TranslateGemma Setup](doc/TRANSLATEGEMMA_SETUP.md) — guide for using Google's local TranslateGemma AI model
 - [TTS Backends](doc/TTS_BACKENDS.md) — details on all voice synthesis backends (gtts, piper, custom/Qwen3-TTS, fish-speech, IndexTTS)
 - [Voice Matching](doc/VOICE_MATCHING.md) — auto-matching voice features

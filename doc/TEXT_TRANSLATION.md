@@ -31,6 +31,7 @@ The translation backends are designed for performance:
 - **translategemma**: Local AI model, no API key, runs on GPU/CPU
 - **metanllb**: Meta's NLLB local AI model, no API key, runs on GPU/CPU
 - **marianmt**: Helsinki-NLP Marian MT local model, no API key, runs on GPU/CPU
+- **gemma4**: Google Gemma 4 multimodal model, local, supports one-pass audio→translated text
 - **none/passthrough**: Skip translation (default behavior)
 
 ## Usage
@@ -246,17 +247,52 @@ Browse all available models at: https://huggingface.co/Helsinki-NLP
 - Each language pair requires a separate model download
 - Quality may be lower than larger models for some language pairs
 
+### 7. Gemma 4 (Local Multimodal AI)
+
+Use Google's Gemma 4 model for text-to-text translation. The same model can also handle audio transcription, enabling a one-pass workflow.
+
+```bash
+--slate-backend gemma4 \
+--slate-model google/gemma-4-E4B-it
+```
+
+**Installation:**
+```bash
+pip install transformers torch accelerate
+```
+
+**Model Download:**
+The model is automatically downloaded from HuggingFace on first use. Sizes: ~5 GB (2B) or ~9 GB (4B).
+
+**Supported Models:**
+- `google/gemma-4-E4B-it` — 4B parameters (default)
+- `google/gemma-4-E2B-it` — 2B parameters, faster
+
+**Pros:**
+- Completely local and private
+- No API keys or internet required (after download)
+- Same model can handle both audio transcription and text translation (one-pass mode)
+- GPU acceleration support
+
+**Cons:**
+- Slower than dedicated translation models (MarianMT, googletrans)
+- Requires GPU for acceptable performance
+- General-purpose model — specialized backends may produce higher quality translations
+
+**One-pass mode:** When both `--scribe-backend` and `--slate-backend` are set to `gemma4` with the same model, anytran performs transcription and translation in a single inference pass. See the [Gemma 4 Setup Guide](GEMMA4_SETUP.md) for details.
+
 ## Configuration Options
 
 ### CLI Arguments
 
 ```bash
 --text-translate-to LANG              # Target language code (e.g., es, fr, de)
---slate-backend BACKEND       # Translation backend (googletrans, libretranslate, translategemma, metanllb, marianmt, none)
+--slate-backend BACKEND       # Translation backend (googletrans, libretranslate, translategemma, metanllb, marianmt, gemma4, none)
 --libretranslate-url URL              # LibreTranslate API URL (if using libretranslate)
 --slate-model MODEL          # TranslateGemma model name (default: google/translategemma-12b-it)
 --slate-model MODEL                # MetaNLLB model name (default: facebook/nllb-200-1.3B)
 --slate-model MODEL                # MarianMT model name (default: Helsinki-NLP/opus-mt-en-ROMANCE)
+--slate-model MODEL                # Gemma 4 model name (default: google/gemma-4-E4B-it)
 --voice-lang LANG                   # Override TTS language (optional)
 --slate-no-opt                      # Disable translation shortcuts (force full pivot through English)
 --slate-opt                         # Re-enable translation shortcuts (default; overrides config file)
@@ -359,6 +395,27 @@ anytran --input slatein.txt \
   --verbose
 ```
 
+### Example 8: Local AI translation with Gemma 4
+
+```bash
+anytran --input notes.txt \
+  --input-lang en --output-lang fr \
+  --slate-backend gemma4 \
+  --slate-text french_output.txt \
+  --verbose
+```
+
+### Example 9: Gemma 4 one-pass transcription + translation
+
+```bash
+# Single model handles both audio transcription and French translation
+anytran --input audio.wav \
+  --output-lang fr \
+  --scribe-backend gemma4 \
+  --slate-backend gemma4 \
+  --slate-text french_output.txt
+```
+
 ## Performance Considerations
 
 ### Translation Speed
@@ -396,6 +453,7 @@ Text translation works seamlessly with:
 - ✅ TTS output (in target language)
 - ✅ Multiple streams
 - ✅ All whisper backends
+- ✅ Gemma 4 one-pass mode (combined transcription + translation)
 
 ## Troubleshooting
 
