@@ -29,7 +29,7 @@ _TIMESTAMP_RE = re.compile(
 
 # Pattern matching music/sound markers like "[Music]", "[music]", "[ 🎵 ]"
 _MUSIC_MARKER_RE = re.compile(
-    r"^\s*(?:\[[\s🎵♪♫]*(?:music|🎵|♪|♫)[\s🎵♪♫]*\]\s*)+$",
+    r"^\s*(?:\[\s*(?:music|🎵|♪|♫)\s*\]\s*)+$",
     re.IGNORECASE,
 )
 
