@@ -132,32 +132,33 @@ class TestTranslateTextGoogletrans(unittest.TestCase):
 
     def test_googletrans_with_mocked_translator(self):
         old_val = self._fn.__globals__.get("_GOOGLETRANS_AVAILABLE")
-        old_getter = self._fn.__globals__.get("_get_googletrans_translator")
+        old_async_fn = self._fn.__globals__.get("_async_googletrans")
         try:
+            import asyncio
             mock_result = MagicMock()
             mock_result.text = "Bonjour"
-            mock_translator = MagicMock()
-            mock_translator.translate = MagicMock(return_value=mock_result)
+            async def fake_async_googletrans(text, src, dest):
+                return mock_result
             self._fn.__globals__["_GOOGLETRANS_AVAILABLE"] = True
-            self._fn.__globals__["_get_googletrans_translator"] = lambda: mock_translator
+            self._fn.__globals__["_async_googletrans"] = fake_async_googletrans
             result = self._fn("Hello", "en", "fr")
         finally:
             self._fn.__globals__["_GOOGLETRANS_AVAILABLE"] = old_val
-            self._fn.__globals__["_get_googletrans_translator"] = old_getter
+            self._fn.__globals__["_async_googletrans"] = old_async_fn
         self.assertEqual(result, "Bonjour")
 
     def test_googletrans_exception_returns_none_after_retries(self):
         old_val = self._fn.__globals__.get("_GOOGLETRANS_AVAILABLE")
-        old_getter = self._fn.__globals__.get("_get_googletrans_translator")
+        old_async_fn = self._fn.__globals__.get("_async_googletrans")
         try:
-            mock_translator = MagicMock()
-            mock_translator.translate = MagicMock(side_effect=Exception("API Error"))
+            async def failing_async_googletrans(text, src, dest):
+                raise Exception("API Error")
             self._fn.__globals__["_GOOGLETRANS_AVAILABLE"] = True
-            self._fn.__globals__["_get_googletrans_translator"] = lambda: mock_translator
+            self._fn.__globals__["_async_googletrans"] = failing_async_googletrans
             result = self._fn("Hello", "en", "fr", verbose=True)
         finally:
             self._fn.__globals__["_GOOGLETRANS_AVAILABLE"] = old_val
-            self._fn.__globals__["_get_googletrans_translator"] = old_getter
+            self._fn.__globals__["_async_googletrans"] = old_async_fn
         self.assertIsNone(result)
 
 

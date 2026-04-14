@@ -11,6 +11,7 @@ Supports:
 - Direct passthrough (no translation)
 """
 
+import asyncio
 import os
 import time
 from typing import Optional, Tuple
@@ -52,7 +53,6 @@ except ImportError:
 # Global configuration
 _translation_backend = "googletrans"
 _libretranslate_url = None
-_googletrans_translator = None  # Cached googletrans Translator instance to avoid repeated initialization
 
 _translategemma_model = None  # Cached TranslateGemma model
 _translategemma_tokenizer = None  # Cached TranslateGemma tokenizer
@@ -192,21 +192,32 @@ def set_gemma4_text_config(model_name: str):
     _gemma4_text_model_name = model_name
 
 
-def _get_googletrans_translator():
-    """Create and reuse a single googletrans Translator instance."""
-    global _googletrans_translator
-    if not _GOOGLETRANS_AVAILABLE:
-        raise ImportError(
-            "googletrans not installed. Install with: pip install googletrans==4.0.0-rc1"
-        )
-    if _googletrans_translator is None:
-        _googletrans_translator = Translator()
-    return _googletrans_translator
+def _run_async(coro):
+    """Run an async coroutine from synchronous code.
+
+    Uses ``asyncio.run()`` when no event loop is running.  When called from
+    inside an already-running loop (e.g. FastAPI / uvicorn), the coroutine is
+    executed in a helper thread so that we never nest ``asyncio.run()`` calls.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # Already inside a running event loop – offload to a worker thread.
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+async def _async_googletrans(text: str, source_lang: str, target_lang: str):
+    """Perform a single googletrans translation using the async API."""
+    async with Translator() as translator:
+        return await translator.translate(text, src=source_lang, dest=target_lang)
 
 
 def translate_text_googletrans(text: str, source_lang: str, target_lang: str, verbose: bool = False) -> Optional[str]:
     """
-    Translate text using googletrans library with retry logic.
+    Translate text using googletrans library (async API, v4.0.2) with retry logic.
 
     Args:
         text: Text to translate
@@ -222,7 +233,7 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
         target_lang = "zh-cn"
     if not _GOOGLETRANS_AVAILABLE:
         if verbose:
-            print("googletrans not installed. Install with: pip install googletrans==4.0.0-rc1")
+            print("googletrans not installed. Install with: pip install googletrans==4.0.2")
         return None
 
     max_retries = 5
@@ -249,13 +260,12 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
 
     for attempt in range(max_retries):
         try:
-            translator = _get_googletrans_translator()
             if verbose:
                 short_text = "empty text"
                 if len(text) > 0:
                     short_text = (text[:10] + '...') if len(text) > 10 else text
                 print(f"Googletrans: Translating '{short_text}' from {source_lang} to {target_lang} (attempt {attempt + 1}/{max_retries})...")  
-            result = translator.translate(text, src=source_lang, dest=target_lang)
+            result = _run_async(_async_googletrans(text, source_lang, target_lang))
             if result is None or not hasattr(result, 'text') or result.text is None:
                 if verbose:
                     short_text = "empty text"
@@ -279,19 +289,8 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
                      short_translated = translated
                print(f"Googletrans: '{short_text}' -> '{short_translated}' ({source_lang}->{target_lang})")
             return translated
-        except AttributeError as exc:
-            # Handle httpcore compatibility issue
-            error_str = str(exc)
-            if "SyncHTTPTransport" in error_str or "httpcore" in error_str.lower():
-                if verbose:
-                    print("Failed after all retry attempts")
-                return None
-            # Other AttributeErrors are treated as non-transient errors; do not re-raise
-            if verbose:
-                print(f"Googletrans non-httpcore AttributeError encountered: {exc}")
-            return None
         except Exception as exc:
-            # Catch-all for other exceptions; retry on likely transient errors (e.g., HTTP 429, network issues)
+            # Catch-all for exceptions; retry on likely transient errors (e.g., HTTP 429, network issues)
             is_last_attempt = attempt == max_retries - 1
             if not is_last_attempt and _is_transient_error(exc):
                 backoff_seconds = 2 ** attempt

@@ -129,12 +129,12 @@ class TestTranslateTextRouting(unittest.TestCase):
         self.assertEqual(result, "World")
 
 
-class TestGetGoogletransTranslator(unittest.TestCase):
-    def test_raises_import_error_when_unavailable(self):
-        from anytran.text_translator import _GOOGLETRANS_AVAILABLE, _get_googletrans_translator
+class TestGoogletransNotAvailable(unittest.TestCase):
+    def test_returns_none_when_unavailable(self):
+        from anytran.text_translator import _GOOGLETRANS_AVAILABLE, translate_text_googletrans
         if not _GOOGLETRANS_AVAILABLE:
-            with self.assertRaises(ImportError):
-                _get_googletrans_translator()
+            result = translate_text_googletrans("Hello", "en", "fr")
+            self.assertIsNone(result)
 
 
 class TestNllbLangMap(unittest.TestCase):
