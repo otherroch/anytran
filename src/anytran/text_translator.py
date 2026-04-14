@@ -73,6 +73,7 @@ _marianmt_loaded_model_name = None  # Track which model name is currently loaded
 _gemma4_text_model = None  # Cached Gemma4 model for text-to-text translation
 _gemma4_text_processor = None  # Cached Gemma4 processor
 _gemma4_text_model_name = "google/gemma-4-E4B-it"  # Default Gemma4 model
+_gemma4_text_loaded_model_name = None  # Track which model name is currently loaded
 
 # Mapping from common ISO 639-1 language codes to FLORES-200 codes used by NLLB
 _NLLB_LANG_MAP = {
@@ -192,21 +193,36 @@ def set_gemma4_text_config(model_name: str):
     _gemma4_text_model_name = model_name
 
 
+_async_executor = None  # Shared ThreadPoolExecutor for _run_async
+
+
+def _get_async_executor():
+    """Return a shared :class:`~concurrent.futures.ThreadPoolExecutor`.
+
+    Lazily created on first use so that normal (no-running-loop) callers
+    never pay the cost of spinning up an extra thread.
+    """
+    global _async_executor
+    if _async_executor is None:
+        import concurrent.futures
+        _async_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    return _async_executor
+
+
 def _run_async(coro):
     """Run an async coroutine from synchronous code.
 
     Uses ``asyncio.run()`` when no event loop is running.  When called from
     inside an already-running loop (e.g. FastAPI / uvicorn), the coroutine is
-    executed in a helper thread so that we never nest ``asyncio.run()`` calls.
+    executed in a shared worker thread so that we never nest ``asyncio.run()``
+    calls and avoid the overhead of creating a new thread pool per call.
     """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    # Already inside a running event loop – offload to a worker thread.
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    # Already inside a running event loop – offload to the shared worker thread.
+    return _get_async_executor().submit(asyncio.run, coro).result()
 
 
 async def _async_googletrans(text: str, source_lang: str, target_lang: str):
@@ -718,14 +734,18 @@ def translate_text_marianmt(text: str, source_lang: str, target_lang: str, verbo
 
 def _get_gemma4_text_model(verbose=False):
     """Load and cache the Gemma4 model and processor for text translation."""
-    global _gemma4_text_model, _gemma4_text_processor
+    global _gemma4_text_model, _gemma4_text_processor, _gemma4_text_loaded_model_name
 
     if not _TRANSFORMERS_AVAILABLE or not _TORCH_AVAILABLE:
         raise ImportError(
             "Gemma4 requires transformers and torch. "
             "Install with: pip install transformers torch accelerate"
         )
-    if _gemma4_text_model is not None and _gemma4_text_processor is not None:
+    if (
+        _gemma4_text_model is not None
+        and _gemma4_text_processor is not None
+        and _gemma4_text_loaded_model_name == _gemma4_text_model_name
+    ):
         return _gemma4_text_model, _gemma4_text_processor
 
     model_name = _gemma4_text_model_name
@@ -746,6 +766,7 @@ def _get_gemma4_text_model(verbose=False):
     if device == "cpu":
         _gemma4_text_model = _gemma4_text_model.to(device)
     _gemma4_text_model.eval()
+    _gemma4_text_loaded_model_name = model_name
     if verbose:
         print(f"Gemma4-text: Loaded model '{model_name}' on device '{_gemma4_text_model.device}'")
     return _gemma4_text_model, _gemma4_text_processor

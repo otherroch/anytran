@@ -269,20 +269,21 @@ def translate_audio_gemma4(
     timings = [] if timers else None
     t0 = time.perf_counter()
 
-    # Resample to 16 kHz mono float32
-    if samplerate != 16000:
-        audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
-        samplerate = 16000
-    add_timing(timings, "resample", t0)
-
-    t0 = time.perf_counter()
-    if audio_data.ndim > 1:
-        audio_data = audio_data[:, 0]
+    # Convert to float32 and downmix to mono before resampling so that
+    # librosa.resample operates on the correct (time) axis.
     if not isinstance(audio_data, np.ndarray):
         audio_data = np.array(audio_data, dtype=np.float32)
     else:
         audio_data = audio_data.astype(np.float32)
+    if audio_data.ndim > 1:
+        audio_data = audio_data[:, 0]
     add_timing(timings, "preprocess", t0)
+
+    t0 = time.perf_counter()
+    if samplerate != 16000:
+        audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
+        samplerate = 16000
+    add_timing(timings, "resample", t0)
 
     t0 = time.perf_counter()
     model, processor = _get_gemma4_model(model_name=model_name, verbose=verbose)
@@ -381,19 +382,21 @@ def translate_audio_gemma4_combined(
     timings = [] if timers else None
     t0 = time.perf_counter()
 
-    if samplerate != 16000:
-        audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
-        samplerate = 16000
-    add_timing(timings, "resample", t0)
-
-    t0 = time.perf_counter()
-    if audio_data.ndim > 1:
-        audio_data = audio_data[:, 0]
+    # Convert to float32 and downmix to mono before resampling so that
+    # librosa.resample operates on the correct (time) axis.
     if not isinstance(audio_data, np.ndarray):
         audio_data = np.array(audio_data, dtype=np.float32)
     else:
         audio_data = audio_data.astype(np.float32)
+    if audio_data.ndim > 1:
+        audio_data = audio_data[:, 0]
     add_timing(timings, "preprocess", t0)
+
+    t0 = time.perf_counter()
+    if samplerate != 16000:
+        audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
+        samplerate = 16000
+    add_timing(timings, "resample", t0)
 
     t0 = time.perf_counter()
     model, processor = _get_gemma4_model(model_name=model_name, verbose=verbose)
