@@ -78,6 +78,7 @@ all = [
   "ctranslate2",
   "torch",
   "torchaudio",
+  "torchvision",  # required by gemma4
   "pyaudiowpatch; sys_platform == 'win32'",
   "pyaudio; sys_platform != 'win32'",
   "huggingface_hub>=0.36.2", 
