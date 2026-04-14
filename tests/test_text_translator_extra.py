@@ -134,7 +134,6 @@ class TestTranslateTextGoogletrans(unittest.TestCase):
         old_val = self._fn.__globals__.get("_GOOGLETRANS_AVAILABLE")
         old_async_fn = self._fn.__globals__.get("_async_googletrans")
         try:
-            import asyncio
             mock_result = MagicMock()
             mock_result.text = "Bonjour"
             async def fake_async_googletrans(text, src, dest):
