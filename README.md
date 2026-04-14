@@ -4,6 +4,11 @@
 
 - `cd anytran`
 
+- Install system prerequisites
+  
+  -  python, ffmpeg and other audio packages 
+  - `sudo ./install_pkg.sh`
+
 - Create python 3.12 environment using venv
   - `python3.12 -m venv .venv`  on Linux/Mac 
   
@@ -26,11 +31,13 @@
 
   - `conda activate anytran`
 
-- Install all features
-  - `pip install --group all -e .[all]`
-    (may require `pip install -U pip`)
 
-- For individual feature installs, GPU support, or Linux system prerequisites, see [INSTALLATION.md](doc/INSTALLATION.md)
+- Install all features
+  -  may require `python -m pip install -U pip`
+  - `pip install --group all -e .`
+   
+
+- For individual feature installs, GPU support, or Linux system prerequisites, see the [installation](doc/INSTALLATION.md) section
 
 ## Run
 

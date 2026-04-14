@@ -19,12 +19,12 @@ Available model sizes:
 ### 1. Install Dependencies
 
 ```bash
-pip install transformers torch accelerate
+pip install transformers torch torchvision accelerate
 ```
 
 This will install:
 - `transformers` — HuggingFace library for loading the model
-- `torch` — PyTorch deep learning framework
+- `torch` and `torchvision` — PyTorch deep learning framework
 - `accelerate` — For efficient model loading and GPU support
 
 ### 2. GPU Support (Recommended)
@@ -32,8 +32,8 @@ This will install:
 Gemma 4 benefits significantly from GPU acceleration:
 
 ```bash
-# Install PyTorch with CUDA support
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch with CUDA support (this is an example of CUDA 12.8)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
 Check GPU availability:
