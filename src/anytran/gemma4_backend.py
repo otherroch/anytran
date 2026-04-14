@@ -376,7 +376,13 @@ def translate_audio_gemma4_combined(
     -------
     tuple
         ``(audio_data, translated_text, detected_lang)``
+    """
+    import torch
 
+    timings = [] if timers else None
+
+    # Convert to float32 and downmix to mono before resampling so that
+    # librosa.resample operates on the correct (time) axis.
     t0 = time.perf_counter()
     if not isinstance(audio_data, np.ndarray):
         audio_data = np.array(audio_data, dtype=np.float32)
@@ -385,12 +391,6 @@ def translate_audio_gemma4_combined(
     if audio_data.ndim > 1:
         audio_data = audio_data[:, 0]
     add_timing(timings, "preprocess", t0)
-
-    t0 = time.perf_counter()
-    if samplerate != 16000:
-        audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
-        samplerate = 16000
-    add_timing(timings, "resample", t0)
 
     t0 = time.perf_counter()
     if samplerate != 16000:

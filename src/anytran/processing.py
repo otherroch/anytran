@@ -303,7 +303,11 @@ def process_audio_chunk(
             if not combined_text:
                 return None
 
-            english_text = combined_text
+            # In one-pass mode the combined result is already translated text,
+            # not an English transcription.  Keep english_text unset so that
+            # downstream scribe TTS (which speaks with tts_lang='en') is
+            # skipped and verbose logs don't mislabel the output as English.
+            english_text = None
             if verbose:
                 print(f"{prefix}Gemma4 one-pass result: '{combined_text}'")
                 print(f"{prefix}  - Detected language hint: {detected_lang}")
@@ -412,8 +416,10 @@ def process_audio_chunk(
     prefix = f"[Stream {stream_id}] " if stream_id else ""
     
     if gemma4_one_pass:
-        # One-pass already produced the final translated text
-        translated_text = english_text
+        # One-pass already produced the final translated text; use it
+        # directly rather than going through english_text (which is None
+        # in one-pass mode).
+        translated_text = combined_text
         stage2_ran = True
         if verbose:
             print(f"{prefix}Stage 2 (Translation): SKIPPED - handled by Gemma4 one-pass")
@@ -478,7 +484,10 @@ def process_audio_chunk(
         print(f"{prefix}  -> final_text_lang={final_text_lang}")
         print(f"{prefix}========================================================")
         print(f"{prefix}PIPELINE SUMMARY:")
-        print(f"{prefix}  Stage 1 Output (Whisper): '{english_text}' [lang: {detected_lang}]")
+        if gemma4_one_pass:
+            print(f"{prefix}  Stage 1 Output (Gemma4 one-pass): '{combined_text}' [lang: {text_translation_target}]")
+        else:
+            print(f"{prefix}  Stage 1 Output (Whisper): '{english_text}' [lang: {detected_lang}]")
         if stage2_ran:
             print(f"{prefix}  Stage 2 Output (Translation): '{translated_text}' [lang: {text_translation_target}]")
         else:
