@@ -52,7 +52,7 @@ faster-whisper = ["faster-whisper", "ctranslate2", "torch", "torchaudio"]
 whisper-ctranslate2 = ["whisper-ctranslate2"]
 output = ["pyaudiowpatch; sys_platform == 'win32'", "pyaudio; sys_platform != 'win32'"]
 # Text translation backends (pick one or more)
-googletrans = ["googletrans==4.0.2", "huggingface_hub==0.36.2"]
+googletrans = ["googletrans==4.0.2", "huggingface_hub>=0.36.2"]
 libretranslate = ["requests", "libretranslate"]
 translategemma = ["transformers>=5.5.0", "torch", "accelerate"]
 marianmt = ["transformers>=5.5.0", "torch", "sentencepiece", "sacremoses"]
@@ -80,7 +80,7 @@ all = [
   "torchaudio",
   "pyaudiowpatch; sys_platform == 'win32'",
   "pyaudio; sys_platform != 'win32'",
-  "huggingface_hub==0.36.2", 
+  "huggingface_hub>=0.36.2", 
   "googletrans==4.0.2",
   "requests",
   "libretranslate",
