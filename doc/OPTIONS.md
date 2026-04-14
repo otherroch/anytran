@@ -192,7 +192,7 @@ These options save or output the translated text (or re-output if `output-lang` 
 
 ### `--scribe-backend <name>`
 - **Type**: Choice
-- **Choices**: `whispercpp`, `whispercpp-cli`, `faster-whisper`, `whisper-ctranslate2`
+- **Choices**: `whispercpp`, `whispercpp-cli`, `faster-whisper`, `whisper-ctranslate2`, `gemma4`
 - **Default**: `faster-whisper`
 - **Behavior**: Selects which Whisper implementation to use
 - **Performance characteristics**:
@@ -200,10 +200,12 @@ These options save or output the translated text (or re-output if `output-lang` 
   - `whispercpp-cli`: CLI-based version of whisper.cpp
   - `faster-whisper`: Using CTranslate2 for optimization, good balance
   - `whisper-ctranslate2`: Optimized inference with CTranslate2, may need GPU setup
+  - `gemma4`: Google Gemma 4 multimodal model, handles audio transcription (and optionally translation in one pass)
 - **Interactions**:
   - `--scribe-model`: Backend-specific model names (e.g., `tiny`, `small`, `medium`, `large`)
   - `--magnitude-threshold`: Used by all backends for silence detection
   - Backend-specific options only apply to chosen backend (non-applicable options are ignored)
+  - When both `--scribe-backend` and `--slate-backend` are `gemma4` with the same model, one-pass mode is activated (see [GEMMA4_SETUP.md](GEMMA4_SETUP.md))
 
 ### `--scribe-model <name|path>`
 - **Type**: Model name or file path
@@ -212,6 +214,7 @@ These options save or output the translated text (or re-output if `output-lang` 
   - `whispercpp`: Model name (tiny, base, small, medium, large) OR path to `.bin` file
   - `faster-whisper`: Model name (tiny, base, small, medium, large-v2, large-v3, etc.)
   - `whisper-ctranslate2`: Model name or path to local model
+  - `gemma4`: HuggingFace model identifier (default: `google/gemma-4-E4B-it`, also `google/gemma-4-E2B-it`)
 - **Behavior**: 
   - For `whispercpp`: Auto-downloads if `--auto-download` enabled and model not found
   - For other backends: Uses HuggingFace Hub or local path
@@ -272,7 +275,7 @@ Stage 2 runs text translation if `--output-lang` ≠ `en`.
 
 ### `--slate-backend <backend>`
 - **Type**: Choice
-- **Choices**: `googletrans`, `libretranslate`, `translategemma`, `metanllb`, `marianmt`, `none`
+- **Choices**: `googletrans`, `libretranslate`, `translategemma`, `metanllb`, `marianmt`, `gemma4`, `none`
 - **Default**: `googletrans`
 - **Behavior**: Selects the text translation service for Stage 2 (language translation)
 - **Options**:
@@ -281,11 +284,12 @@ Stage 2 runs text translation if `--output-lang` ≠ `en`.
   - `translategemma`: Local Google TranslateGemma AI model, no API key, runs on GPU/CPU
   - `metanllb`: Local Meta NLLB model, no API key, 200+ languages, runs on GPU/CPU
   - `marianmt`: Local Helsinki-NLP Marian MT models, no API key, lightweight, runs on GPU/CPU
+  - `gemma4`: Local Google Gemma 4 multimodal model, no API key, runs on GPU/CPU (see [GEMMA4_SETUP.md](GEMMA4_SETUP.md))
   - `none`: Skips text translation (Stage 2)
 - **Interactions**:
   - Only used if `--output-lang` ≠ `en` (Stage 2 runs)
   - `--libretranslate-url`: Required if backend is `libretranslate`
-  - `--slate-model`: Selects the model variant for `translategemma`, `metanllb`, or `marianmt`
+  - `--slate-model`: Selects the model variant for `translategemma`, `metanllb`, `marianmt`, or `gemma4`
   - Parallel to transcription backend choice (independent)
 
 ### `--libretranslate-url <url>`

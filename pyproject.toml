@@ -52,10 +52,10 @@ faster-whisper = ["faster-whisper", "ctranslate2", "torch", "torchaudio"]
 whisper-ctranslate2 = ["whisper-ctranslate2"]
 output = ["pyaudiowpatch; sys_platform == 'win32'", "pyaudio; sys_platform != 'win32'"]
 # Text translation backends (pick one or more)
-googletrans = ["googletrans==4.0.0rc1", "httpcore==0.9.1", "httpx==0.13.3", "huggingface_hub==0.36.2"]
+googletrans = ["googletrans==4.0.2", "huggingface_hub>=0.36.2"]
 libretranslate = ["requests", "libretranslate"]
-translategemma = ["transformers==4.57.3", "torch", "accelerate"]
-marianmt = ["transformers==4.57.3", "torch", "sentencepiece", "sacremoses"]
+translategemma = ["transformers>=5.5.0", "torch", "accelerate"]
+marianmt = ["transformers>=5.5.0", "torch", "sentencepiece", "sacremoses"]
 
 [dependency-groups]
 # Lightweight group for running the test suite locally and in CI.
@@ -78,16 +78,15 @@ all = [
   "ctranslate2",
   "torch",
   "torchaudio",
+  "torchvision",  # required by gemma4
   "pyaudiowpatch; sys_platform == 'win32'",
   "pyaudio; sys_platform != 'win32'",
-  "huggingface_hub==0.36.2", 
-  "googletrans==4.0.0rc1",
-  "httpcore==0.9.1",
-  "httpx==0.13.3",
+  "huggingface_hub>=0.36.2", 
+  "googletrans==4.0.2",
   "requests",
   "libretranslate",
   "accelerate",
-  "transformers==4.57.3",
+  "transformers>=5.5.0",
   "sentencepiece",
   "sacremoses",
   "silero-vad",

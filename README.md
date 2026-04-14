@@ -4,6 +4,11 @@
 
 - `cd anytran`
 
+- Install system prerequisites
+  
+  -  python, ffmpeg and other audio packages 
+  - `sudo ./install_pkg.sh`
+
 - Create python 3.12 environment using venv
   - `python3.12 -m venv .venv`  on Linux/Mac 
   
@@ -26,11 +31,13 @@
 
   - `conda activate anytran`
 
-- Install all features
-  - `pip install --group all -e .[all]`
-    (may require `pip install -U pip`)
 
-- For individual feature installs, GPU support, or Linux system prerequisites, see [INSTALLATION.md](doc/INSTALLATION.md)
+- Install all features
+  -  may require `python -m pip install -U pip`
+  - `pip install --group all -e .`
+   
+
+- For individual feature installs, GPU support, or Linux system prerequisites, see the [installation](doc/INSTALLATION.md) section
 
 ## Run
 
@@ -69,7 +76,8 @@ For a complete reference of all command line options and how they interact with 
 
 Additional topic guides:
 - [Installation](doc/INSTALLATION.md) — CUDA GPU support, individual feature installs, and Linux system prerequisites
-- [Text Translation Backends](doc/TEXT_TRANSLATION.md) — details on all translation backends (googletrans, libretranslate, MarianMT, MetaNLLB, TranslateGemma)
+- [Text Translation Backends](doc/TEXT_TRANSLATION.md) — details on all translation backends (googletrans, libretranslate, MarianMT, MetaNLLB, TranslateGemma, Gemma 4)
+- [Gemma 4 Setup](doc/GEMMA4_SETUP.md) — guide for using Google's Gemma 4 multimodal model for transcription and translation
 - [TranslateGemma Setup](doc/TRANSLATEGEMMA_SETUP.md) — guide for using Google's local TranslateGemma AI model
 - [TTS Backends](doc/TTS_BACKENDS.md) — details on all voice synthesis backends (gtts, piper, custom/Qwen3-TTS, fish-speech, IndexTTS)
 - [Voice Matching](doc/VOICE_MATCHING.md) — auto-matching voice features

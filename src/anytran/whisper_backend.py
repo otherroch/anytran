@@ -1226,5 +1226,17 @@ def translate_audio(audio_data, samplerate=16000, input_lang=None, output_lang=N
             timers=timers,
             timing_stats=timing_stats,
         )
+    elif backend == "gemma4":
+        from .gemma4_backend import translate_audio_gemma4
+        return translate_audio_gemma4(
+            audio_data,
+            samplerate=samplerate,
+            input_lang=input_lang,
+            output_lang=output_lang,
+            model_name=model if model != "medium" else None,
+            verbose=verbose,
+            timers=timers,
+            timing_stats=timing_stats,
+        )
     else:
         raise ValueError(f"Unsupported backend: {backend}")

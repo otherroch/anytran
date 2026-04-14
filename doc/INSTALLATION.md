@@ -2,11 +2,9 @@
 
 ## Linux system prerequisites
 
-On Linux, you may need to install the following system packages before installing Python dependencies (as used in the [Dockerfile](../Dockerfile)):
+On Linux, you may need to execute this shell script to install various system packages **before** installing Python dependencies:
 
-```bash
-sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
-```
+`sudo ./install_pkg.sh` (script: [`install_pkg.sh`](../install_pkg.sh), as used in the [Dockerfile](../Dockerfile))
 
 ## GPU support
 
@@ -16,13 +14,13 @@ sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
    ` pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130`
 ## Development environment
 
-- `pip install --group dev --group all -e .[all]`
+- `pip install --group dev --group all -e .`
 
 ## Docker images 
 
 - Built with [Dockerfile](../Dockerfile)
 - `docker pull otherroch/anytran`
-- `docker run -it --gpus all otherroch/anytran --help`  
+- `docker run -it --rm --gpus all otherroch/anytran --help`  
 
 ## Install pywhispercpp on CUDA GPU (optional feature)
 
@@ -47,14 +45,14 @@ sudo apt-get install -y portaudio19-dev build-essential ffmpeg git cmake
 - Piper TTS: `pip install -e .[piper]`
 - Custom TTS (Qwen3-TTS): `pip install -e .[custom]`
 - Fish-speech TTS: `pip install -e .[fish]`
+- Whisper backends:
+  - `pip install -e .[whispercpp]` or
+  - `pip install -e .[faster-whisper]` or
+  - `pip install -e .[whisper-ctranslate2]`
+- Windows output capture: `pip install -e .[output]`
 - IndexTTS:
   ```bash
   GIT_LFS_SKIP_SMUDGE=1 pip install git+https://github.com/index-tts/index-tts.git
   pip install "anytran[index-tts]"
   ```
   > Note: IndexTTS is not published on PyPI. The `GIT_LFS_SKIP_SMUDGE=1` flag skips large example audio files from Git LFS that are not needed at runtime.
-- Whisper backends:
-  - `pip install -e .[whispercpp]` or
-  - `pip install -e .[faster-whisper]` or
-  - `pip install -e .[whisper-ctranslate2]`
-- Windows output capture: `pip install -e .[output]`

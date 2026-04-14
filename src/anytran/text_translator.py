@@ -11,6 +11,7 @@ Supports:
 - Direct passthrough (no translation)
 """
 
+import asyncio
 import os
 import time
 from typing import Optional, Tuple
@@ -52,7 +53,6 @@ except ImportError:
 # Global configuration
 _translation_backend = "googletrans"
 _libretranslate_url = None
-_googletrans_translator = None  # Cached googletrans Translator instance to avoid repeated initialization
 
 _translategemma_model = None  # Cached TranslateGemma model
 _translategemma_tokenizer = None  # Cached TranslateGemma tokenizer
@@ -69,6 +69,11 @@ _marianmt_model = None  # Cached MarianMT model
 _marianmt_tokenizer = None  # Cached MarianMT tokenizer
 _marianmt_model_name = None  # If None, auto-derive from language pair as Helsinki-NLP/opus-mt-{src}-{tgt}
 _marianmt_loaded_model_name = None  # Track which model name is currently loaded
+
+_gemma4_text_model = None  # Cached Gemma4 model for text-to-text translation
+_gemma4_text_processor = None  # Cached Gemma4 processor
+_gemma4_text_model_name = "google/gemma-4-E4B-it"  # Default Gemma4 model
+_gemma4_text_loaded_model_name = None  # Track which model name is currently loaded
 
 # Mapping from common ISO 639-1 language codes to FLORES-200 codes used by NLLB
 _NLLB_LANG_MAP = {
@@ -182,21 +187,53 @@ def set_marianmt_config(model_name: str):
     _marianmt_model_name = model_name
 
 
-def _get_googletrans_translator():
-    """Create and reuse a single googletrans Translator instance."""
-    global _googletrans_translator
-    if not _GOOGLETRANS_AVAILABLE:
-        raise ImportError(
-            "googletrans not installed. Install with: pip install googletrans==4.0.0-rc1"
-        )
-    if _googletrans_translator is None:
-        _googletrans_translator = Translator()
-    return _googletrans_translator
+def set_gemma4_text_config(model_name: str):
+    """Set Gemma4 text-to-text translation model name."""
+    global _gemma4_text_model_name
+    _gemma4_text_model_name = model_name
+
+
+_async_executor = None  # Shared ThreadPoolExecutor for _run_async
+
+
+def _get_async_executor():
+    """Return a shared :class:`~concurrent.futures.ThreadPoolExecutor`.
+
+    Lazily created on first use so that normal (no-running-loop) callers
+    never pay the cost of spinning up an extra thread.
+    """
+    global _async_executor
+    if _async_executor is None:
+        import concurrent.futures
+        _async_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    return _async_executor
+
+
+def _run_async(coro):
+    """Run an async coroutine from synchronous code.
+
+    Uses ``asyncio.run()`` when no event loop is running.  When called from
+    inside an already-running loop (e.g. FastAPI / uvicorn), the coroutine is
+    executed in a shared worker thread so that we never nest ``asyncio.run()``
+    calls and avoid the overhead of creating a new thread pool per call.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # Already inside a running event loop – offload to the shared worker thread.
+    return _get_async_executor().submit(asyncio.run, coro).result()
+
+
+async def _async_googletrans(text: str, source_lang: str, target_lang: str):
+    """Perform a single googletrans translation using the async API."""
+    async with Translator() as translator:
+        return await translator.translate(text, src=source_lang, dest=target_lang)
 
 
 def translate_text_googletrans(text: str, source_lang: str, target_lang: str, verbose: bool = False) -> Optional[str]:
     """
-    Translate text using googletrans library with retry logic.
+    Translate text using googletrans library (async API, v4.0.2) with retry logic.
 
     Args:
         text: Text to translate
@@ -212,7 +249,7 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
         target_lang = "zh-cn"
     if not _GOOGLETRANS_AVAILABLE:
         if verbose:
-            print("googletrans not installed. Install with: pip install googletrans==4.0.0-rc1")
+            print("googletrans not installed. Install with: pip install googletrans==4.0.2")
         return None
 
     max_retries = 5
@@ -239,13 +276,12 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
 
     for attempt in range(max_retries):
         try:
-            translator = _get_googletrans_translator()
             if verbose:
                 short_text = "empty text"
                 if len(text) > 0:
                     short_text = (text[:10] + '...') if len(text) > 10 else text
                 print(f"Googletrans: Translating '{short_text}' from {source_lang} to {target_lang} (attempt {attempt + 1}/{max_retries})...")  
-            result = translator.translate(text, src=source_lang, dest=target_lang)
+            result = _run_async(_async_googletrans(text, source_lang, target_lang))
             if result is None or not hasattr(result, 'text') or result.text is None:
                 if verbose:
                     short_text = "empty text"
@@ -269,19 +305,8 @@ def translate_text_googletrans(text: str, source_lang: str, target_lang: str, ve
                      short_translated = translated
                print(f"Googletrans: '{short_text}' -> '{short_translated}' ({source_lang}->{target_lang})")
             return translated
-        except AttributeError as exc:
-            # Handle httpcore compatibility issue
-            error_str = str(exc)
-            if "SyncHTTPTransport" in error_str or "httpcore" in error_str.lower():
-                if verbose:
-                    print("Failed after all retry attempts")
-                return None
-            # Other AttributeErrors are treated as non-transient errors; do not re-raise
-            if verbose:
-                print(f"Googletrans non-httpcore AttributeError encountered: {exc}")
-            return None
         except Exception as exc:
-            # Catch-all for other exceptions; retry on likely transient errors (e.g., HTTP 429, network issues)
+            # Catch-all for exceptions; retry on likely transient errors (e.g., HTTP 429, network issues)
             is_last_attempt = attempt == max_retries - 1
             if not is_last_attempt and _is_transient_error(exc):
                 backoff_seconds = 2 ** attempt
@@ -702,6 +727,118 @@ def translate_text_marianmt(text: str, source_lang: str, target_lang: str, verbo
         return None
 
 
+# ---------------------------------------------------------------------------
+# Gemma4 text-to-text translation backend
+# ---------------------------------------------------------------------------
+
+
+def _get_gemma4_text_model(verbose=False):
+    """Load and cache the Gemma4 model and processor for text translation."""
+    global _gemma4_text_model, _gemma4_text_processor, _gemma4_text_loaded_model_name
+
+    if not _TRANSFORMERS_AVAILABLE or not _TORCH_AVAILABLE:
+        raise ImportError(
+            "Gemma4 requires transformers and torch. "
+            "Install with: pip install transformers torch accelerate"
+        )
+    if (
+        _gemma4_text_model is not None
+        and _gemma4_text_processor is not None
+        and _gemma4_text_loaded_model_name == _gemma4_text_model_name
+    ):
+        return _gemma4_text_model, _gemma4_text_processor
+
+    model_name = _gemma4_text_model_name
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if verbose:
+        print(f"Gemma4-text: Loading processor '{model_name}' on device '{device}'")
+    _gemma4_text_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    if verbose:
+        print(f"Gemma4-text: Loading model '{model_name}' on device '{device}'")
+    # Gemma4 registers as AutoModelForImageTextToText in HuggingFace even
+    # though it supports text-only inputs as well (multimodal architecture).
+    _gemma4_text_model = AutoModelForImageTextToText.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        trust_remote_code=True,
+    )
+    if device == "cpu":
+        _gemma4_text_model = _gemma4_text_model.to(device)
+    _gemma4_text_model.eval()
+    _gemma4_text_loaded_model_name = model_name
+    if verbose:
+        print(f"Gemma4-text: Loaded model '{model_name}' on device '{_gemma4_text_model.device}'")
+    return _gemma4_text_model, _gemma4_text_processor
+
+
+def translate_text_gemma4(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    verbose: bool = False,
+) -> Optional[str]:
+    """Translate text using a Gemma4 multimodal model (text-to-text).
+
+    Args:
+        text: Text to translate.
+        source_lang: Source language code.
+        target_lang: Target language code.
+        verbose: Print debug information.
+
+    Returns:
+        Translated text or ``None`` on failure.
+    """
+    try:
+        model, processor = _get_gemma4_text_model(verbose=verbose)
+
+        prompt_text = (
+            f"Translate to {target_lang}. "
+            f"Reply with ONLY the translation, nothing else.\n\n{text}"
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt_text}],
+            }
+        ]
+        if verbose:
+            print(f"Gemma4-text: Translating '{text[:30]}' from {source_lang} to {target_lang}...")
+
+        inputs = processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            add_generation_prompt=True,
+        ).to(model.device)
+        input_len = inputs["input_ids"].shape[-1]
+
+        with torch.inference_mode():
+            generation = model.generate(**inputs, max_new_tokens=1000, do_sample=False)
+        generation = generation[0][input_len:]
+        raw_translated = processor.decode(generation, skip_special_tokens=True).strip()
+
+        # Post-process: strip artifacts the model may inject
+        from .gemma4_backend import _clean_gemma4_output
+        translated = _clean_gemma4_output(raw_translated, prompt_text=prompt_text)
+
+        if verbose and translated:
+            short_text = (text[:30] + "...") if len(text) > 30 else text
+            short_translated = (translated[:30] + "...") if len(translated) > 30 else translated
+            print(f"Gemma4-text: '{short_text}' -> '{short_translated}' ({source_lang}->{target_lang})")
+
+        return translated
+    except ImportError as e:
+        if verbose:
+            print(f"Gemma4 dependencies not installed: {e}")
+        return None
+    except Exception as exc:
+        if verbose:
+            print(f"Gemma4 text translation failed: {exc}")
+        return None
+
+
 
 def translate_text(
     text: str,
@@ -744,6 +881,8 @@ def translate_text(
         return translate_text_metanllb(text, source_lang, target_lang, verbose)
     elif backend_to_use == "marianmt":
         return translate_text_marianmt(text, source_lang, target_lang, verbose)
+    elif backend_to_use == "gemma4":
+        return translate_text_gemma4(text, source_lang, target_lang, verbose)
     else:
         if verbose:
             print(f"Unknown translation backend: {backend_to_use}")
@@ -758,4 +897,5 @@ __all__ = [
     "set_translategemma_config",
     "set_metanllb_config",
     "set_marianmt_config",
+    "set_gemma4_text_config",
 ]
