@@ -9,8 +9,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev python3-venv python3-pip portaudio19-dev build-essential \
-     ffmpeg git cmake && \
+    ffmpeg git cmake \ 
+    libavdevice-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libavfilter-dev && \  
     rm -rf /var/lib/apt/lists/*
+
+
+RUN 
 
 # Copy the current directory contents into the container at /app
 COPY pyproject.toml LICENSE  README.md /app/
