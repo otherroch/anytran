@@ -19,9 +19,9 @@ from typing import Optional, Tuple
 try:
     from transformers import (
         AutoProcessor,
-        AutoModelForImageTextToText,
-        AutoModelForMultimodalLM,
-        pipeline,
+        AutoModelForImageTextToText,  # TranslateGemma
+        AutoModelForMultimodalLM,     # Gemma4
+        pipeline,                     # TranslateGemma pipeline mode
         AutoTokenizer,
         M2M100ForConditionalGeneration,
         AutoModelForSeq2SeqLM,
