@@ -193,7 +193,7 @@ def _get_gemma4_model(model_name=None, verbose=False):
 
     try:
         import torch
-        from transformers import AutoProcessor, AutoModelForImageTextToText
+        from transformers import AutoProcessor, AutoModelForMultimodalLM
     except ImportError as exc:
         raise ImportError(
             "Gemma4 requires transformers and torch. "
@@ -212,7 +212,7 @@ def _get_gemma4_model(model_name=None, verbose=False):
     _gemma4_processor = AutoProcessor.from_pretrained(effective_name, trust_remote_code=True)
     if verbose:
         print(f"Gemma4: Loading model '{effective_name}' on device '{device}'")
-    _gemma4_model = AutoModelForImageTextToText.from_pretrained(
+    _gemma4_model = AutoModelForMultimodalLM.from_pretrained(
         effective_name,
         torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,

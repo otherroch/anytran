@@ -42,8 +42,8 @@ if "transformers" not in sys.modules:
     sys.modules["transformers"] = types.ModuleType("transformers")
 _transformers = sys.modules["transformers"]
 for _cls in (
-    "AutoProcessor", "AutoModelForImageTextToText", "pipeline",
-    "AutoTokenizer", "M2M100ForConditionalGeneration",
+    "AutoProcessor", "AutoModelForImageTextToText", "AutoModelForMultimodalLM",
+    "pipeline", "AutoTokenizer", "M2M100ForConditionalGeneration",
     "AutoModelForSeq2SeqLM", "NllbTokenizer", "NllbTokenizerFast",
     "MarianMTModel", "MarianTokenizer",
 ):

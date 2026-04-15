@@ -20,6 +20,7 @@ try:
     from transformers import (
         AutoProcessor,
         AutoModelForImageTextToText,
+        AutoModelForMultimodalLM,
         pipeline,
         AutoTokenizer,
         M2M100ForConditionalGeneration,
@@ -32,7 +33,7 @@ try:
     _TRANSFORMERS_AVAILABLE = True
 except ImportError:
     _TRANSFORMERS_AVAILABLE = False
-    AutoProcessor = AutoModelForImageTextToText = pipeline = None
+    AutoProcessor = AutoModelForImageTextToText = AutoModelForMultimodalLM = pipeline = None
     AutoTokenizer = M2M100ForConditionalGeneration = AutoModelForSeq2SeqLM = None
     NllbTokenizer = NllbTokenizerFast = MarianMTModel = MarianTokenizer = None
 
@@ -755,9 +756,7 @@ def _get_gemma4_text_model(verbose=False):
     _gemma4_text_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
     if verbose:
         print(f"Gemma4-text: Loading model '{model_name}' on device '{device}'")
-    # Gemma4 registers as AutoModelForImageTextToText in HuggingFace even
-    # though it supports text-only inputs as well (multimodal architecture).
-    _gemma4_text_model = AutoModelForImageTextToText.from_pretrained(
+    _gemma4_text_model = AutoModelForMultimodalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,

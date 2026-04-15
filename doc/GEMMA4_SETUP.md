@@ -211,7 +211,7 @@ anytran --input audio.wav \
 
 ## Model Details
 
-- **Architecture**: Multimodal (audio + text + image), uses `AutoModelForImageTextToText`
+- **Architecture**: Multimodal (audio + text + image), uses `AutoModelForMultimodalLM`
 - **Default model**: `google/gemma-4-E4B-it` (4B parameters, instruction-tuned)
 - **Smaller variant**: `google/gemma-4-E2B-it` (2B parameters, instruction-tuned)
 - **License**: See model card on [HuggingFace](https://huggingface.co/google/gemma-4-E4B-it)
