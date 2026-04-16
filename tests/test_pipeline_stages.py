@@ -37,7 +37,8 @@ for _attr in ("bfloat16", "float32", "float16"):
     if not hasattr(_torch, _attr):
         setattr(_torch, _attr, _attr)
 
-# Stub transformers with every class imported by text_translator.py.
+# Stub transformers with every class imported by text_translator.py
+# (including AutoModelForMultimodalLM which is lazily imported in _get_gemma4_text_model).
 if "transformers" not in sys.modules:
     sys.modules["transformers"] = types.ModuleType("transformers")
 _transformers = sys.modules["transformers"]

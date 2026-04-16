@@ -20,7 +20,6 @@ try:
     from transformers import (
         AutoProcessor,
         AutoModelForImageTextToText,  # TranslateGemma
-        AutoModelForMultimodalLM,     # Gemma4
         pipeline,                     # TranslateGemma pipeline mode
         AutoTokenizer,
         M2M100ForConditionalGeneration,
@@ -33,7 +32,7 @@ try:
     _TRANSFORMERS_AVAILABLE = True
 except ImportError:
     _TRANSFORMERS_AVAILABLE = False
-    AutoProcessor = AutoModelForImageTextToText = AutoModelForMultimodalLM = pipeline = None
+    AutoProcessor = AutoModelForImageTextToText = pipeline = None
     AutoTokenizer = M2M100ForConditionalGeneration = AutoModelForSeq2SeqLM = None
     NllbTokenizer = NllbTokenizerFast = MarianMTModel = MarianTokenizer = None
 
@@ -737,10 +736,19 @@ def _get_gemma4_text_model(verbose=False):
     """Load and cache the Gemma4 model and processor for text translation."""
     global _gemma4_text_model, _gemma4_text_processor, _gemma4_text_loaded_model_name
 
-    if not _TRANSFORMERS_AVAILABLE or not _TORCH_AVAILABLE:
+    try:
+        from transformers import AutoModelForMultimodalLM
+    except ImportError as exc:
         raise ImportError(
-            "Gemma4 requires transformers and torch. "
-            "Install with: pip install transformers torch accelerate"
+            "Gemma4 text translation requires a recent version of transformers "
+            "with AutoModelForMultimodalLM support. "
+            "Install/upgrade with: pip install --upgrade transformers torch accelerate"
+        ) from exc
+
+    if not _TORCH_AVAILABLE:
+        raise ImportError(
+            "Gemma4 requires torch. "
+            "Install with: pip install torch"
         )
     if (
         _gemma4_text_model is not None
