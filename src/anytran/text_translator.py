@@ -19,8 +19,8 @@ from typing import Optional, Tuple
 try:
     from transformers import (
         AutoProcessor,
-        AutoModelForImageTextToText,
-        pipeline,
+        AutoModelForImageTextToText,  # TranslateGemma
+        pipeline,                     # TranslateGemma pipeline mode
         AutoTokenizer,
         M2M100ForConditionalGeneration,
         AutoModelForSeq2SeqLM,
@@ -736,10 +736,19 @@ def _get_gemma4_text_model(verbose=False):
     """Load and cache the Gemma4 model and processor for text translation."""
     global _gemma4_text_model, _gemma4_text_processor, _gemma4_text_loaded_model_name
 
-    if not _TRANSFORMERS_AVAILABLE or not _TORCH_AVAILABLE:
+    try:
+        from transformers import AutoModelForMultimodalLM
+    except ImportError as exc:
         raise ImportError(
-            "Gemma4 requires transformers and torch. "
-            "Install with: pip install transformers torch accelerate"
+            "Gemma4 text translation requires a recent version of transformers "
+            "with AutoModelForMultimodalLM support. "
+            "Install/upgrade with: pip install --upgrade transformers torch accelerate"
+        ) from exc
+
+    if not _TORCH_AVAILABLE:
+        raise ImportError(
+            "Gemma4 requires torch. "
+            "Install with: pip install torch"
         )
     if (
         _gemma4_text_model is not None
@@ -755,9 +764,7 @@ def _get_gemma4_text_model(verbose=False):
     _gemma4_text_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
     if verbose:
         print(f"Gemma4-text: Loading model '{model_name}' on device '{device}'")
-    # Gemma4 registers as AutoModelForImageTextToText in HuggingFace even
-    # though it supports text-only inputs as well (multimodal architecture).
-    _gemma4_text_model = AutoModelForImageTextToText.from_pretrained(
+    _gemma4_text_model = AutoModelForMultimodalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,
