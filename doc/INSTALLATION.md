@@ -8,10 +8,17 @@ On Linux, you may need to execute this shell script to install various system pa
 
 ## GPU support
 
-- you may need to install the appropriate torch version (see https://pytorch.org/get-started/locally/)
+- you may need to install the appropriate torch version **FIRST** (see https://pytorch.org/get-started/locally/)
 - for example:
 
    ` pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130`
+
+- you may need to install onnxruntime-gpu **LAST** to make sure it replaces onnxruntime: 
+
+   ` pip uninstall onnxruntime onnxruntime-gpu -y`
+
+   ` pip install onnxruntime-gpu`
+
 ## Development environment
 
 - `pip install --group dev --group all -e .`
