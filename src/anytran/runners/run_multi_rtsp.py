@@ -7,6 +7,8 @@ from anytran.stream_rtsp import stream_rtsp_audio
 from anytran.timing import TimingsAggregator
 from anytran.utils import compute_window_params
 import threading
++from .config import CommonConfig
+import threading
 import numpy as np
 import signal
 import time
@@ -48,6 +50,7 @@ def run_multi_rtsp(
     lang_prefix=False,
     normalize=True,
     capture_voice_path=None,
+    common_params: CommonConfig | None = None,
 ):
     print(f"Starting {len(rtsp_urls)} RTSP streams...")
 
@@ -81,6 +84,46 @@ def run_multi_rtsp(
     # output_text_file removed
     scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
     slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
+    if common_params:
+        # Override shared parameters
+        if common_params.input_lang is not None:
+            input_lang = common_params.input_lang
+        if common_params.output_lang is not None:
+            output_lang = common_params.output_lang
+        if common_params.magnitude_threshold is not None:
+            magnitude_threshold = common_params.magnitude_threshold
+        if common_params.model is not None:
+            model = common_params.model
+        if common_params.verbose is not None:
+            verbose = common_params.verbose
+        if common_params.mqtt_broker is not None:
+            mqtt_broker = common_params.mqtt_broker
+        if common_params.mqtt_port is not None:
+            mqtt_port = common_params.mqtt_port
+        if common_params.mqtt_username is not None:
+            mqtt_username = common_params.mqtt_username
+        if common_params.mqtt_password is not None:
+            mqtt_password = common_params.mqtt_password
+        if common_params.mqtt_topic is not None:
+            mqtt_topic = common_params.mqtt_topic
+        if common_params.scribe_vad is not None:
+            scribe_vad = common_params.scribe_vad
+        if common_params.voice_backend is not None:
+            voice_backend = common_params.voice_backend
+        if common_params.voice_model is not None:
+            voice_model = common_params.voice_model
+        if common_params.timers is not None:
+            timers = common_params.timers
+        if common_params.scribe_backend is not None:
+            scribe_backend = common_params.scribe_backend
+        if common_params.text_translation_target is not None:
+            text_translation_target = common_params.text_translation_target
+        if common_params.slate_backend is not None:
+            slate_backend = common_params.slate_backend
+        if common_params.voice_lang is not None:
+            voice_lang = common_params.voice_lang
+        if common_params.lang_prefix is not None:
+            lang_prefix = common_params.lang_prefix
     if timers_all:
         timers = True  # timers_all implies timers       
     timing_stats = TimingsAggregator("multi_rtsp") if timers else None

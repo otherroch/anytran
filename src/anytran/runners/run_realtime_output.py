@@ -4,6 +4,8 @@ from anytran.normalizer import normalize_text
 from anytran.processing import process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.timing import TimingsAggregator
+import threading
++from .config import CommonConfig
 from anytran.utils import compute_window_params
 import threading
 import numpy as np
@@ -45,6 +47,7 @@ def run_realtime_output(
     lang_prefix=False,
     normalize=True,
     capture_voice_path=None,
+    common_params: CommonConfig | None = None,
 ):
     print("Starting real-time system output audio translation...")
     print(f"Input language: {input_lang}, Output language: {output_lang}")
@@ -81,6 +84,46 @@ def run_realtime_output(
     if mqtt_broker:
         init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
 
+    if common_params:
+        # Override shared parameters
+        if common_params.input_lang is not None:
+            input_lang = common_params.input_lang
+        if common_params.output_lang is not None:
+            output_lang = common_params.output_lang
+        if common_params.magnitude_threshold is not None:
+            magnitude_threshold = common_params.magnitude_threshold
+        if common_params.model is not None:
+            model = common_params.model
+        if common_params.verbose is not None:
+            verbose = common_params.verbose
+        if common_params.mqtt_broker is not None:
+            mqtt_broker = common_params.mqtt_broker
+        if common_params.mqtt_port is not None:
+            mqtt_port = common_params.mqtt_port
+        if common_params.mqtt_username is not None:
+            mqtt_username = common_params.mqtt_username
+        if common_params.mqtt_password is not None:
+            mqtt_password = common_params.mqtt_password
+        if common_params.mqtt_topic is not None:
+            mqtt_topic = common_params.mqtt_topic
+        if common_params.scribe_vad is not None:
+            scribe_vad = common_params.scribe_vad
+        if common_params.voice_backend is not None:
+            voice_backend = common_params.voice_backend
+        if common_params.voice_model is not None:
+            voice_model = common_params.voice_model
+        if common_params.timers is not None:
+            timers = common_params.timers
+        if common_params.scribe_backend is not None:
+            scribe_backend = common_params.scribe_backend
+        if common_params.text_translation_target is not None:
+            text_translation_target = common_params.text_translation_target
+        if common_params.slate_backend is not None:
+            slate_backend = common_params.slate_backend
+        if common_params.voice_lang is not None:
+            voice_lang = common_params.voice_lang
+        if common_params.lang_prefix is not None:
+            lang_prefix = common_params.lang_prefix
     if timers_all:
         timers = True  # timers_all implies timers      
     timing_stats = TimingsAggregator("output") if timers else None
