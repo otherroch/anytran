@@ -1,5 +1,7 @@
 import numpy as np
 import time
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List
 
 from .mqtt_client import send_mqtt_text
 from .text_translator import translate_text
@@ -12,6 +14,96 @@ from .gemma4_backend import translate_audio_gemma4_combined
 from .config import get_gemma4_config
 
 
+@dataclass
+class PipelineConfig:
+    """Configuration for the translation pipeline that remains constant per run.
+    
+    This class groups parameters that rarely change during a pipeline run into
+    organized sections, reducing the number of parameters passed through the
+    call graph from 35+ individual arguments to a single configuration object.
+    """
+    
+    # MQTT configuration - connection settings that stay constant
+    mqtt_config: Optional[Dict[str, Any]] = field(
+        default=None,
+        metadata={"description": "Dictionary containing MQTT broker, port, username, password, topic"}
+    )
+    
+    # Backend configuration - model/backend names that stay constant
+    backend_config: Optional[Dict[str, Any]] = field(
+        default=None,
+        metadata={"description": "Dictionary containing scribe_backend, slate_backend, voice_backend"}
+    )
+    
+    # Output configuration - file paths and language overrides that stay constant
+    output_config: Optional[Dict[str, Any]] = field(
+        default=None,
+        metadata={"description": "Dictionary containing voice_lang, scribe_text_file, slate_text_file"}
+    )
+    
+    # Voice configuration - voice matching and prefix settings that stay constant
+    voice_config: Optional[Dict[str, Any]] = field(
+        default=None,
+        metadata={"description": "Dictionary containing voice_match, lang_prefix"}
+    )
+    
+    # Language swap configuration - LangSwap settings that stay constant
+    langswap_config: Optional[Dict[str, Any]] = field(
+        default=None,
+        metadata={"description": "Dictionary containing langswap_enabled, langswap_input_lang, langswap_output_lang"}
+    )
+    
+    # Per-chunk mutable state - these accumulate across chunks
+    chunk_state: Dict[str, Any] = field(
+        default_factory=dict,
+        metadata={"description": "Mutable state accumulated across audio chunks (segments, buffers, etc.)"}
+    )
+    
+    def get_mqtt_dict(self) -> Optional[Dict[str, Any]]:
+        """Extract MQTT parameters as a dictionary."""
+        config = self.mqtt_config or {}
+        return {
+            "broker": config.get("broker"),
+            "port": config.get("port"),
+            "username": config.get("username"),
+            "password": config.get("password"),
+            "topic": config.get("topic"),
+        }
+    
+    def get_backend_dict(self) -> Optional[Dict[str, Any]]:
+        """Extract backend configuration as a dictionary."""
+        config = self.backend_config or {}
+        return {
+            "scribe_backend": config.get("scribe_backend"),
+            "slate_backend": config.get("slate_backend"),
+            "voice_backend": config.get("voice_backend"),
+        }
+    
+    def get_output_dict(self) -> Optional[Dict[str, Any]]:
+        """Extract output configuration as a dictionary."""
+        config = self.output_config or {}
+        return {
+            "voice_lang": config.get("voice_lang"),
+            "scribe_text_file": config.get("scribe_text_file"),
+            "slate_text_file": config.get("slate_text_file"),
+        }
+    
+    def get_voice_dict(self) -> Optional[Dict[str, Any]]:
+        """Extract voice configuration as a dictionary."""
+        config = self.voice_config or {}
+        return {
+            "voice_match": config.get("voice_match", False),
+            "lang_prefix": config.get("lang_prefix", False),
+        }
+    
+    def get_langswap_dict(self) -> Optional[Dict[str, Any]]:
+        """Extract language swap configuration as a dictionary."""
+        config = self.langswap_config or {}
+        return {
+            "enabled": config.get("langswap_enabled", False),
+            "input_lang": config.get("langswap_input_lang"),
+            "output_lang": config.get("langswap_output_lang"),
+        }
 def build_output_prefix(stream_id=None, detected_lang=None):
     lang_map = {
         "en": "English",
@@ -61,37 +153,33 @@ def build_output_prefix(stream_id=None, detected_lang=None):
 def process_audio_chunk(
     audio_segment,
     rate,
-    input_lang,
-    output_lang,
-    magnitude_threshold,
-    model,
-    verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
+    pipeline_config=None,
+    input_lang=None,
+    output_lang=None,
+    magnitude_threshold=None,
+    model=None,
+    verbose=None,
     stream_id=None,
-    scribe_vad=True,
-    voice_backend="gtts",
+    scribe_vad=None,
+    voice_backend=None,
     voice_model=None,
     chat_logger=None,
     rtsp_ip=None,
-    timers=False,
+    timers=None,
     timing_stats=None,
-    scribe_backend="auto",
+    scribe_backend=None,
     text_translation_target=None,
-    slate_backend="googletrans",
+    slate_backend=None,
     voice_lang=None,
     scribe_text_file=None,
     slate_text_file=None,
     scribe_tts_segments=None,
     slate_tts_segments=None,
-    langswap_enabled=False,
+    langswap_enabled=None,
     langswap_input_lang=None,
     langswap_output_lang=None,
-    voice_match=False,
-    lang_prefix=False,
+    voice_match=None,
+    lang_prefix=None,
 ):
     """
     Process an audio chunk through a 3-stage pipeline:
@@ -216,6 +304,25 @@ def process_audio_chunk(
     - ``stage3_tts_playback``: TTS audio playback (if requested)
     - ``text_out``, ``mqtt``, ``chat_log``, ``tts_append``: Output operations
     """
+    # Unpack configuration from PipelineConfig object (if provided)
+    mqtt_config = None
+    backend_config = None
+    output_config = None
+    voice_config = None
+    langswap_config = None
+    
+    if pipeline_config:
+        if pipeline_config.mqtt_config:
+            mqtt_config = pipeline_config.mqtt_config
+        if pipeline_config.backend_config:
+            backend_config = pipeline_config.backend_config
+        if pipeline_config.output_config:
+            output_config = pipeline_config.output_config
+        if pipeline_config.voice_config:
+            voice_config = pipeline_config.voice_config
+        if pipeline_config.langswap_config:
+            langswap_config = pipeline_config.langswap_config
+    
     timings = [] if timers else None
     t0 = time.perf_counter()
     magnitude = np.abs(audio_segment).mean()

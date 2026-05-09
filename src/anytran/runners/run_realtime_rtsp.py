@@ -93,9 +93,42 @@ def run_realtime_rtsp(
     if mqtt_broker:
         init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
 
-    if timers_all:
+if timers_all:
         timers = True  # timers_all implies timers       
     timing_stats = TimingsAggregator("rtsp") if timers else None
+
+# Create PipelineConfig to pass rarely-changing parameters
+from anytran.processing import PipelineConfig
+
+# Prepare configuration dictionaries
+mqtt_dict = {
+    "broker": mqtt_broker,
+    "port": mqtt_port,
+    "username": mqtt_username,
+    "password": mqtt_password,
+    "topic": mqtt_topic,
+}
+backend_dict = {
+    "scribe_backend": scribe_backend,
+    "slate_backend": slate_backend,
+    "voice_backend": voice_backend,
+}
+output_dict = {
+    "voice_lang": voice_lang,
+    "scribe_text_file": scribe_text_file,
+    "slate_text_file": slate_text_file,
+}
+voice_dict = {
+    "voice_match": voice_match,
+    "lang_prefix": lang_prefix,
+}
+
+pipeline_config = PipelineConfig(
+    mqtt_config=mqtt_dict,
+    backend_config=backend_dict,
+    output_config=output_dict,
+    voice_config=voice_dict,
+)
 
     audio_queue = Queue(maxsize=50)
     buffer = np.array([], dtype=np.float32)
@@ -131,36 +164,32 @@ def run_realtime_rtsp(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
+                    # Create PipelineConfig for process_audio_chunk call
+                    pipeline_config_for_chunk = PipelineConfig(
+                        mqtt_config=mqtt_dict,
+                        backend_config=backend_dict,
+                        output_config=output_dict,
+                        voice_config=voice_dict,
+                    )
+                    
                     result = process_audio_chunk(
                         audio_segment,
                         rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
-                        scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
-                        voice_model=voice_model,
+                        pipeline_config=pipeline_config_for_chunk,
+                        input_lang=input_lang,
+                        output_lang=output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
                         chat_logger=chat_logger,
                         rtsp_ip=rtsp_ip,
+                        scribe_vad=scribe_vad,
+                        voice_model=voice_model,
                         timers=timers,
                         timing_stats=timing_stats,
-                        scribe_backend=scribe_backend,
                         text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
-                        scribe_text_file=None,
-                        slate_text_file=None,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
                     )
                     # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                     if result:

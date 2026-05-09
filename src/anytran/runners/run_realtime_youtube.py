@@ -97,8 +97,41 @@ def run_realtime_youtube(
     if verbose and youtube_remote_components:
         print(f"Using yt-dlp remote components: {youtube_remote_components}")
 
-    def resolve_audio_url():
-        return get_youtube_audio_stream_url(
+# Create PipelineConfig to pass rarely-changing parameters
+from anytran.processing import PipelineConfig
+
+# Prepare configuration dictionaries
+mqtt_dict = {
+    "broker": mqtt_broker,
+    "port": mqtt_port,
+    "username": mqtt_username,
+    "password": mqtt_password,
+    "topic": mqtt_topic,
+}
+backend_dict = {
+    "scribe_backend": scribe_backend,
+    "slate_backend": slate_backend,
+    "voice_backend": voice_backend,
+}
+output_dict = {
+    "voice_lang": voice_lang,
+    "scribe_text_file": scribe_text_file,
+    "slate_text_file": slate_text_file,
+}
+voice_dict = {
+    "voice_match": voice_match,
+    "lang_prefix": lang_prefix,
+}
+
+pipeline_config = PipelineConfig(
+    mqtt_config=mqtt_dict,
+    backend_config=backend_dict,
+    output_config=output_dict,
+    voice_config=voice_dict,
+)
+
+def resolve_audio_url():
+    return get_youtube_audio_stream_url(
             youtube_url,
             verbose=verbose,
             js_runtime=js_runtime,
@@ -172,35 +205,32 @@ def run_realtime_youtube(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
+                    
+                    # Create PipelineConfig for process_audio_chunk call
+                    pipeline_config_for_chunk = PipelineConfig(
+                        mqtt_config=mqtt_dict,
+                        backend_config=backend_dict,
+                        output_config=output_dict,
+                        voice_config=voice_dict,
+                    )
+                    
                     result = process_audio_chunk(
                         audio_segment,
                         rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
+                        pipeline_config=pipeline_config_for_chunk,
+                        input_lang=input_lang,
+                        output_lang=output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
                         stream_id="youtube",
                         scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
                         voice_model=voice_model,
                         timers=timers,
                         timing_stats=timing_stats,
-                        scribe_backend=scribe_backend,
                         text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
-                        scribe_text_file=None,
-                        slate_text_file=None,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
                     )
                     
                     # Deduplication: Write outputs only if not in recent window
@@ -264,35 +294,31 @@ def run_realtime_youtube(
             if verbose:
                 print("Processing final audio buffer...")
             try:
+                # Create PipelineConfig for final buffer process_audio_chunk call
+                pipeline_config_final = PipelineConfig(
+                    mqtt_config=mqtt_dict,
+                    backend_config=backend_dict,
+                    output_config=output_dict,
+                    voice_config=voice_dict,
+                )
+                
                 result = process_audio_chunk(
                     buffer,
                     rate,
-                    input_lang,
-                    output_lang,
-                    magnitude_threshold,
-                    model,
-                    verbose,
-                    mqtt_broker,
-                    mqtt_port,
-                    mqtt_username,
-                    mqtt_password,
-                    mqtt_topic,
+                    pipeline_config=pipeline_config_final,
+                    input_lang=input_lang,
+                    output_lang=output_lang,
+                    magnitude_threshold=magnitude_threshold,
+                    model=model,
+                    verbose=verbose,
                     stream_id="youtube",
                     scribe_vad=scribe_vad,
-                    voice_backend=voice_backend,
                     voice_model=voice_model,
                     timers=timers,
                     timing_stats=timing_stats,
-                    scribe_backend=scribe_backend,
                     text_translation_target=text_translation_target,
-                    slate_backend=slate_backend,
-                    voice_lang=voice_lang,
-                    scribe_text_file=None,
-                    slate_text_file=None,
                     scribe_tts_segments=scribe_audio_segments,
                     slate_tts_segments=slate_audio_segments,
-                    voice_match=voice_match,
-                    lang_prefix=lang_prefix,
                 )
                 
                 # Deduplication: Write outputs only if different from last ones

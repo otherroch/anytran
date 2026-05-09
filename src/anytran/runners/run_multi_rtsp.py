@@ -78,12 +78,42 @@ def run_multi_rtsp(
         print(f"Scribe text (English) will be saved to: {scribe_text_file}")
     if slate_text_file:
         print(f"Slate text (translated) will be saved to: {slate_text_file}")
-    # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
-    if timers_all:
-        timers = True  # timers_all implies timers       
-    timing_stats = TimingsAggregator("multi_rtsp") if timers else None
+# Create PipelineConfig to pass rarely-changing parameters
+from anytran.processing import PipelineConfig
+
+# Prepare configuration dictionaries
+mqtt_dict = {
+    "broker": mqtt_broker,
+    "port": mqtt_port,
+    "username": mqtt_username,
+    "password": mqtt_password,
+    "topic": mqtt_topic,
+}
+backend_dict = {
+    "scribe_backend": scribe_backend,
+    "slate_backend": slate_backend,
+    "voice_backend": voice_backend,
+}
+output_dict = {
+    "voice_lang": voice_lang,
+    "scribe_text_file": scribe_text_file,
+    "slate_text_file": slate_text_file,
+}
+voice_dict = {
+    "voice_match": voice_match,
+    "lang_prefix": lang_prefix,
+}
+
+pipeline_config = PipelineConfig(
+    mqtt_config=mqtt_dict,
+    backend_config=backend_dict,
+    output_config=output_dict,
+    voice_config=voice_dict,
+)
+
+if timers_all:
+    timers = True  # timers_all implies timers       
+timing_stats = TimingsAggregator("multi_rtsp") if timers else None
 
     def worker(rtsp_url, idx):
         # Deduplication tracking for this worker's stream
@@ -119,37 +149,31 @@ def run_multi_rtsp(
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
                         buffer = buffer[chunk - overlap :]
+                        # Create PipelineConfig for process_audio_chunk call
+                        pipeline_config_for_chunk = PipelineConfig(
+                            mqtt_config=mqtt_dict,
+                            backend_config=backend_dict,
+                            output_config=output_dict,
+                            voice_config=voice_dict,
+                        )
+                        
                         result = process_audio_chunk(
                             audio_segment,
                             rate,
-                            input_lang,
-                            output_lang,
-                            magnitude_threshold,
-                            model,
-                            verbose,
-                            mqtt_broker,
-                            mqtt_port,
-                            mqtt_username,
-                            mqtt_password,
-                            stream_mqtt_topic,
-                            stream_id=idx,
+                            pipeline_config=pipeline_config_for_chunk,
+                            input_lang=input_lang,
+                            output_lang=output_lang,
+                            magnitude_threshold=magnitude_threshold,
+                            model=model,
+                            verbose=verbose,
+                            stream_id=str(idx),
                             scribe_vad=scribe_vad,
-                            voice_backend=voice_backend,
                             voice_model=voice_model,
-                            chat_logger=chat_logger,
-                            rtsp_ip=rtsp_ip,
                             timers=timers,
                             timing_stats=timing_stats,
-                            scribe_backend=scribe_backend,
                             text_translation_target=text_translation_target,
-                            slate_backend=slate_backend,
-                            voice_lang=voice_lang,
-                            scribe_text_file=None,
-                            slate_text_file=None,
                             scribe_tts_segments=local_scribe_audio_segments,
                             slate_tts_segments=local_slate_audio_segments,
-                            voice_match=voice_match,
-                            lang_prefix=lang_prefix,
                         )
                         # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                         if result:
