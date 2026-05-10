@@ -10,18 +10,19 @@ import time
 
 import numpy as np
 
-from ..pipeline_config import MQTTConfig, PipelineConfig, OutputConfig, RunnerConfig, StreamContext
-from ..stream_output import (
-    compute_window_params,
-    init_mqtt,
-    normalize_text,
-    output_audio,
-)
+from ..pipeline_config import RunnerConfig, StreamContext
+from ..utils import compute_window_params
+from ..mqtt_client import init_mqtt
+from ..normalizer import normalize_text
+from ..audio_io import output_audio
+from ..stream_youtube import get_youtube_audio_stream_url, parse_iso8601_duration, extract_youtube_video_id, validate_youtube_video
+from ..processing import process_audio_chunk
 
 
 def run_realtime_youtube(
     url: str,
-    cfg: RunnerConfig,
+    cfg: "RunnerConfig" = None,
+    **kwargs,
 ):
     """Run the pipeline on a YouTube live stream.
 
@@ -32,7 +33,13 @@ def run_realtime_youtube(
     cfg : RunnerConfig
         Combined runner configuration.  Runner-specific extras:
         * ``youtube_js_runtime`` : str or None  - js_path for yt-dlp.
+        If not provided, individual keyword arguments are accepted for
+        backward compatibility.
+    **kwargs : dict
+        Legacy individual keyword arguments.
     """
+    if cfg is None:
+        cfg = RunnerConfig._from_kwargs(**kwargs)
     pipeline = cfg.pipeline
     output = cfg.output
     mqtt = cfg.mqtt
@@ -166,14 +173,12 @@ def run_realtime_youtube(
 # ------ Helpers ------
 
 def _process_chunk(chunk, sample_rate, pipeline, stream_ctx, mqtt_cfg):
-    from ..stream_output import process_audio_chunk
-
     return process_audio_chunk(
         chunk,
         sample_rate,
-        pipeline_cfg=pipeline,
-        stream_ctx=stream_ctx,
-        mqtt_cfg=mqtt_cfg,
+        pipeline,
+        stream_ctx,
+        mqtt_cfg,
     )
 
 

@@ -290,3 +290,83 @@ class RunnerConfig:
     def overlap(self):
         """Overlap in seconds (convenience forward)."""
         return self.pipeline.overlap_seconds
+
+    # -- backward-compat factory ----------------------------------------------
+
+    @classmethod
+    def _from_kwargs(cls, **kwargs) -> "RunnerConfig":
+        """Construct a RunnerConfig from old-style individual keyword args.
+
+        This factory recognises the legacy kwarg names used in the test suite
+        and CLI entry points and groups them into the appropriate sub-configs.
+
+        Recognised legacy keys
+        ----------------------
+        Pipeline (behaviour):
+            input_lang, output_lang, text_translation_target, model,
+            magnitude_threshold, scribe_vad, window_seconds, overlap_seconds,
+            scribe_backend, slate_backend, voice_backend, voice_model,
+            voice_lang, voice_match, lang_prefix, normalize, dedup,
+            slate_no_opt, batch, verbose, timers, timers_all, keep_temp,
+            langswap_enabled, langswap_input_lang, langswap_output_lang
+
+        Output (file paths):
+            scribe_text_file, slate_text_file, output_audio_path,
+            slate_audio_path, capture_voice_path, chat_log_dir
+
+        MQTT:
+            mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic
+
+        Runner-specific extras:
+            Everything else is collected into ``extra``.
+        """
+
+        # -- Pipeline kwargs --
+        pipeline_fields = {
+            "input_lang", "output_lang", "text_translation_target",
+            "model", "magnitude_threshold", "scribe_vad",
+            "window_seconds", "overlap_seconds",
+            "scribe_backend", "slate_backend", "voice_backend",
+            "voice_model", "voice_lang",
+            "voice_match", "lang_prefix",
+            "normalize", "dedup", "slate_no_opt", "batch",
+            "verbose", "timers", "timers_all",
+            "keep_temp",
+            "langswap_enabled", "langswap_input_lang", "langswap_output_lang",
+        }
+        pipeline_kw = {k: v for k, v in kwargs.items() if k in pipeline_fields and v is not None}
+
+        # -- Output kwargs --
+        output_fields = {
+            "scribe_text_file", "slate_text_file", "output_audio_path",
+            "slate_audio_path", "capture_voice_path", "chat_log_dir",
+        }
+        output_kw = {k: v for k, v in kwargs.items() if k in output_fields and v is not None}
+
+        # -- MQTT kwargs --
+        mqtt_fields = {
+            "mqtt_broker", "mqtt_port", "mqtt_username",
+            "mqtt_password", "mqtt_topic",
+        }
+        mqtt_kw = {}
+        mqtt_field_map = {
+            "mqtt_broker": "broker",
+            "mqtt_port": "port",
+            "mqtt_username": "username",
+            "mqtt_password": "password",
+            "mqtt_topic": "topic",
+        }
+        for legacy_key, canon_key in mqtt_field_map.items():
+            if legacy_key in kwargs and kwargs[legacy_key] is not None:
+                mqtt_kw[canon_key] = kwargs[legacy_key]
+
+        # -- Extras --
+        extra_keys = pipeline_fields | output_fields | mqtt_fields
+        extra_kw = {k: v for k, v in kwargs.items() if k not in extra_keys}
+
+        return cls(
+            pipeline=PipelineConfig(**pipeline_kw),
+            output=OutputConfig(**output_kw) if output_kw else OutputConfig(),
+            mqtt=MQTTConfig(**mqtt_kw) if mqtt_kw else MQTTConfig(),
+            extra=extra_kw if extra_kw else {},
+        )

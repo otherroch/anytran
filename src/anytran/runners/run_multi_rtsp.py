@@ -1,55 +1,56 @@
-from anytran.audio_io import output_audio
-from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
-from anytran.mqtt_client import init_mqtt
-from anytran.normalizer import normalize_text
-from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
-from anytran.processing import process_audio_chunk
-from anytran.stream_rtsp import stream_rtsp_audio
-from anytran.timing import TimingsAggregator
-from anytran.utils import compute_window_params
+"""Multi-RTSP runner.
+
+Connects to multiple RTSP streams concurrently and runs the translation
+pipeline on each one.
+"""
+
 import threading
-import numpy as np
 import signal
 import time
+
+import numpy as np
+
+from ..pipeline_config import RunnerConfig, StreamContext
+from ..processing import process_audio_chunk
+from ..stream_rtsp import stream_rtsp_audio
+from ..timing import TimingsAggregator
+from ..audio_io import output_audio
+from ..chatlog import ChatLogger, extract_ip_from_rtsp_url
+from ..mqtt_client import init_mqtt
+from ..normalizer import normalize_text
+from ..utils import compute_window_params
 from queue import Queue, Empty
 
+
 def run_multi_rtsp(
-    rtsp_urls,
-    input_lang=None,
-    output_lang=None,
-    output_audio_path=None,
-    slate_audio_path=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    topic_names=None,
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    chat_log_dir=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    dedup=False,
-    lang_prefix=False,
-    normalize=True,
-    capture_voice_path=None,
+    rtsp_urls: list[str],
+    cfg: "RunnerConfig" = None,
+    **kwargs,
 ):
+    """Run the pipeline on multiple RTSP streams concurrently.
+
+    Parameters
+    ----------
+    rtsp_urls : list[str]
+        List of RTSP stream URLs.
+    cfg : RunnerConfig
+        Combined runner configuration.
+        If not provided, individual keyword arguments are accepted for
+        backward compatibility.
+    **kwargs : dict
+        Legacy individual keyword arguments.
+    """
+    if cfg is None:
+        cfg = RunnerConfig._from_kwargs(**kwargs)
+    pipeline = cfg.pipeline
+    output = cfg.output
+    mqtt = cfg.mqtt
+
+    verbose = pipeline.verbose
+    normalize = pipeline.normalize
+    dedup = pipeline.dedup
+    timers_all = pipeline.timers_all
+
     print(f"Starting {len(rtsp_urls)} RTSP streams...")
 
     stop_event = threading.Event()
@@ -60,55 +61,63 @@ def run_multi_rtsp(
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    # -- chat logger ------
     chat_logger = None
+    chat_log_dir = output.chat_log_dir
     if chat_log_dir:
         chat_logger = ChatLogger(chat_log_dir)
         print(f"Chat logging enabled. Logs will be saved to: {chat_log_dir}")
 
-    if mqtt_broker:
-        if topic_names and len(topic_names) == len(rtsp_urls):
-            print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}")
-            for i, topic in enumerate(topic_names, 1):
-                print(f"  Stream {i} -> topic: {topic}")
-        else:
-            print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}")
-            for i in range(len(rtsp_urls)):
-                print(f"  Stream {i + 1} -> topic: stream{i + 1}")
-        init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
-    if scribe_text_file:
-        print(f"Scribe text (English) will be saved to: {scribe_text_file}")
-    if slate_text_file:
-        print(f"Slate text (translated) will be saved to: {slate_text_file}")
-    # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
-    if timers_all:
-        timers = True  # timers_all implies timers       
-    timing_stats = TimingsAggregator("multi_rtsp") if timers else None
+    # -- mqtt announcement ------
+    if mqtt.is_enabled:
+        print(f"MQTT output enabled: {mqtt.broker}:{mqtt.port}")
+        for i in range(len(rtsp_urls)):
+            print(f"  Stream {i + 1} -> topic: stream{i + 1}")
+        init_mqtt(mqtt.broker, mqtt.port, mqtt.username, mqtt.password, mqtt.topic)
 
+    # -- text file announcement ------
+    if output.scribe_text_file:
+        print(f"Scribe text (English) will be saved to: {output.scribe_text_file}")
+    if output.slate_text_file:
+        print(f"Slate text (translated) will be saved to: {output.slate_text_file}")
+
+    # -- file handles ------
+    scribe_file = open(output.scribe_text_file, mode="w", encoding="utf-8") if output.scribe_text_file else None
+    slate_file = open(output.slate_text_file, mode="w", encoding="utf-8") if output.slate_text_file else None
+
+    # -- timing ------
+    pipeline.timers = pipeline.timers or timers_all
+    timing_stats = TimingsAggregator("multi_rtsp") if pipeline.timers else None
+
+    # -- mqtt config for downstream calls ------
+    mqtt_cfg = mqtt if mqtt.is_enabled else None
+
+    # -- worker function ------
     def worker(rtsp_url, idx):
-        # Deduplication tracking for this worker's stream
-        last_scribe_output = None
-        last_slate_output = None
         recent_slate_outputs = []
         recent_scribe_outputs = []
-        dedup_window_size = 10  # Check last 10 outputs
+        dedup_window_size = 10
         audio_queue = Queue(maxsize=5)
         buffer = np.array([], dtype=np.float32)
-        stream_thread = threading.Thread(target=stream_rtsp_audio, args=(rtsp_url, audio_queue), daemon=True)
+        stream_thread = threading.Thread(
+            target=stream_rtsp_audio,
+            args=(rtsp_url, audio_queue),
+            daemon=True,
+        )
         stream_thread.start()
+
         rate = 16000
-        chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
-        local_scribe_audio_segments = [] if output_audio_path else None
-        local_slate_audio_segments = [] if slate_audio_path else None
-        local_capture_voice_segments = [] if capture_voice_path else None
+        chunk, overlap = compute_window_params(rate, pipeline.window_seconds, pipeline.overlap_seconds)
+
+        local_scribe_audio_segments = [] if output.output_audio_path else None
+        local_slate_audio_segments = [] if output.slate_audio_path else None
+        local_capture_voice_segments = [] if output.capture_voice_path else None
+
         rtsp_ip = extract_ip_from_rtsp_url(rtsp_url) if chat_logger else None
         if chat_logger and rtsp_ip:
             print(f"[Stream {idx}] RTSP IP: {rtsp_ip}")
-        if topic_names and len(topic_names) >= idx:
-            stream_mqtt_topic = topic_names[idx - 1]
-        else:
-            stream_mqtt_topic = f"stream{idx}"
+
+        stream_mqtt_topic = f"stream{idx}"
 
         try:
             while not stop_event.is_set():
@@ -119,32 +128,9 @@ def run_multi_rtsp(
                     buffer = np.concatenate([buffer, audio_chunk])
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
-                        buffer = buffer[chunk - overlap :]
-                        pipeline_cfg = PipelineConfig(
-                            input_lang=input_lang,
-                            output_lang=output_lang,
-                            magnitude_threshold=magnitude_threshold,
-                            model=model,
-                            verbose=verbose,
-                            scribe_vad=scribe_vad,
-                            voice_backend=voice_backend,
-                            voice_model=voice_model,
-                            timers=timers,
-                            scribe_backend=scribe_backend,
-                            text_translation_target=text_translation_target,
-                            slate_backend=slate_backend,
-                            voice_lang=voice_lang,
-                            voice_match=voice_match,
-                            lang_prefix=lang_prefix,
-                        )
-                        mqtt_cfg = MQTTConfig(
-                            broker=mqtt_broker,
-                            port=mqtt_port,
-                            username=mqtt_username,
-                            password=mqtt_password,
-                            topic=stream_mqtt_topic,
-                        ) if mqtt_broker else None
+                        buffer = buffer[chunk - overlap:]
 
+                        # -- build per-stream context (mutable state only) ------
                         stream_ctx = StreamContext(
                             stream_id=idx,
                             chat_logger=chat_logger,
@@ -157,44 +143,22 @@ def run_multi_rtsp(
                         result = process_audio_chunk(
                             audio_segment,
                             rate,
-                            pipeline_cfg,
+                            pipeline,
                             stream_ctx,
                             mqtt_cfg,
                         )
-                        # Deduplication: Write outputs only if not in recent window (if dedup enabled)
+
+                        # -- write text outputs ------
                         if result:
-                            scribe_output = result.get('scribe')
-                            slate_output = result.get('slate')
-                            if dedup:
-                                if scribe_output and scribe_output not in recent_scribe_outputs:
-                                    if scribe_file:
-                                        if normalize:
-                                            scribe_output = normalize_text(scribe_output)
-                                        scribe_file.write(f"{scribe_output}\n")
-                                        scribe_file.flush()
-                                    recent_scribe_outputs.append(scribe_output)
-                                    if len(recent_scribe_outputs) > dedup_window_size:
-                                        recent_scribe_outputs.pop(0)
-                                if slate_output and slate_output not in recent_slate_outputs:
-                                    if slate_file:
-                                        if normalize:
-                                            slate_output = normalize_text(slate_output)
-                                        slate_file.write(f"{slate_output}\n")
-                                        slate_file.flush()
-                                    recent_slate_outputs.append(slate_output)
-                                    if len(recent_slate_outputs) > dedup_window_size:
-                                        recent_slate_outputs.pop(0)
-                            else:
-                                if scribe_output and scribe_file:
-                                    if normalize:
-                                        scribe_output = normalize_text(scribe_output)
-                                    scribe_file.write(f"{scribe_output}\n")
-                                    scribe_file.flush()
-                                if slate_output and slate_file:
-                                    if normalize:
-                                        slate_output = normalize_text(slate_output)
-                                    slate_file.write(f"{slate_output}\n")
-                                    slate_file.flush()
+                            scribe_output = result.get("scribe")
+                            slate_output = result.get("slate")
+                            _write_outputs(
+                                scribe_output, slate_output,
+                                scribe_file, slate_file,
+                                normalize, dedup,
+                                recent_scribe_outputs, recent_slate_outputs,
+                                dedup_window_size,
+                            )
                 except Empty:
                     if stop_event.is_set():
                         break
@@ -203,51 +167,15 @@ def run_multi_rtsp(
             if verbose:
                 print(f"[Stream {idx}] Stopped.")
         finally:
-            if local_scribe_audio_segments is not None:
-                if len(local_scribe_audio_segments) > 0:
-                    all_audio = np.concatenate(local_scribe_audio_segments)
-                    output_file = (
-                        f"{output_audio_path.rsplit('.', 1)[0]}_stream{idx}.{output_audio_path.rsplit('.', 1)[1]}"
-                        if output_audio_path
-                        else None
-                    )
-                    if output_file:
-                        try:
-                            output_audio(all_audio, output_file, play=False)
-                            print(f"[Stream {idx}] Scribe audio saved to {output_file}", flush=True)
-                        except Exception as exc:
-                            print(f"[Stream {idx}] Error saving scribe audio file: {exc}", flush=True)
-                            import traceback
-                            traceback.print_exc()
-            if local_slate_audio_segments is not None:
-                if len(local_slate_audio_segments) > 0:
-                    all_audio = np.concatenate(local_slate_audio_segments)
-                    output_file = (
-                        f"{slate_audio_path.rsplit('.', 1)[0]}_stream{idx}.{slate_audio_path.rsplit('.', 1)[1]}"
-                        if slate_audio_path
-                        else None
-                    )
-                    if output_file:
-                        try:
-                            output_audio(all_audio, output_file, play=False)
-                            print(f"[Stream {idx}] Slate audio saved to {output_file}", flush=True)
-                        except Exception as exc:
-                            print(f"[Stream {idx}] Error saving slate audio file: {exc}", flush=True)
-                            import traceback
-                            traceback.print_exc()
-            if local_capture_voice_segments is not None:
-                if len(local_capture_voice_segments) > 0:
-                    all_audio = np.concatenate(local_capture_voice_segments)
-                    parts = capture_voice_path.rsplit('.', 1)
-                    output_file = f"{parts[0]}_stream{idx}.{parts[1]}" if len(parts) == 2 else f"{capture_voice_path}_stream{idx}"
-                    try:
-                        output_audio(all_audio, output_file, play=False)
-                        print(f"[Stream {idx}] Captured input voice saved to {output_file}", flush=True)
-                    except Exception as exc:
-                        print(f"[Stream {idx}] Error saving captured input voice: {exc}", flush=True)
-                        import traceback
-                        traceback.print_exc()
+            # -- write audio files for this stream ------
+            _write_stream_audio(local_scribe_audio_segments,
+                               output.output_audio_path, idx, "Scribe")
+            _write_stream_audio(local_slate_audio_segments,
+                               output.slate_audio_path, idx, "Slate")
+            _write_stream_audio(local_capture_voice_segments,
+                               output.capture_voice_path, idx, "Captured input voice")
 
+    # -- spawn threads ------
     threads = []
     for i, url in enumerate(rtsp_urls):
         thread = threading.Thread(target=worker, args=(url, i + 1), daemon=False)
@@ -268,10 +196,12 @@ def run_multi_rtsp(
             chat_logger.close()
         if scribe_file:
             scribe_file.close()
-            print(f"Scribe text file saved: {scribe_text_file}", flush=True)
+            print(f"Scribe text file saved: {output.scribe_text_file}", flush=True)
         if slate_file:
             slate_file.close()
-            print(f"Slate text file saved: {slate_text_file}", flush=True)
+            print(f"Slate text file saved: {output.slate_text_file}", flush=True)
+
+        # -- timing summary ------
         if timing_stats is not None:
             if timers_all:
                 summary = timing_stats.format_summary()
@@ -280,10 +210,68 @@ def run_multi_rtsp(
                 stage_summary = timing_stats.format_stage_summary()
                 if stage_summary:
                     print(f"\nTiming summary by stage (multi-rtsp):\n{stage_summary}")
-                overhead = timing_stats.format_translate_overhead('chunk')
+                overhead = timing_stats.format_translate_overhead("chunk")
                 if overhead:
                     print(f"\nTiming translate overhead (multi-rtsp):\n{overhead}")
-            elif timers:
+            elif pipeline.timers:
                 stage_summary = timing_stats.format_stage_summary()
                 if stage_summary:
                     print(f"\nTiming summary by stage (multi-rtsp):\n{stage_summary}")
+
+
+# -------  Helpers  -------
+
+def _write_outputs(
+    scribe_output, slate_output,
+    scribe_file, slate_file,
+    normalize, dedup,
+    recent_scribe, recent_slate,
+    dedup_window_size,
+):
+    """Write scribe/slate text to files, optionally deduplicating."""
+    if dedup:
+        if scribe_output and scribe_output not in recent_scribe:
+            if scribe_file:
+                if normalize:
+                    scribe_output = normalize_text(scribe_output)
+                scribe_file.write(f"{scribe_output}\n")
+                scribe_file.flush()
+            recent_scribe.append(scribe_output)
+            if len(recent_scribe) > dedup_window_size:
+                recent_scribe.pop(0)
+        if slate_output and slate_output not in recent_slate:
+            if slate_file:
+                if normalize:
+                    slate_output = normalize_text(slate_output)
+                slate_file.write(f"{slate_output}\n")
+                slate_file.flush()
+            recent_slate.append(slate_output)
+            if len(recent_slate) > dedup_window_size:
+                recent_slate.pop(0)
+    else:
+        if scribe_output and scribe_file:
+            if normalize:
+                scribe_output = normalize_text(scribe_output)
+            scribe_file.write(f"{scribe_output}\n")
+            scribe_file.flush()
+        if slate_output and slate_file:
+            if normalize:
+                slate_output = normalize_text(slate_output)
+            slate_file.write(f"{slate_output}\n")
+            slate_file.flush()
+
+
+def _write_stream_audio(segments, base_path, idx, label):
+    """Write accumulated audio segments for one stream to a file."""
+    if segments is not None and len(segments) > 0:
+        all_audio = np.concatenate(segments)
+        if base_path:
+            parts = base_path.rsplit(".", 1)
+            output_file = f"{parts[0]}_stream{idx}.{parts[1]}" if len(parts) == 2 else f"{base_path}_stream{idx}"
+            try:
+                output_audio(all_audio, output_file, play=False)
+                print(f"[Stream {idx}] {label} audio saved to {output_file}", flush=True)
+            except Exception as exc:
+                print(f"[Stream {idx}] Error saving {label.lower()} audio file: {exc}", flush=True)
+                import traceback
+                traceback.print_exc()

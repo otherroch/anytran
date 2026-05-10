@@ -68,7 +68,21 @@ def process_audio_chunk(
     mqtt: Optional[MQTTConfig] = None,
 ):
     """
-    Process an audio chunk through a 3-stage pipeline.
+    Process an audio chunk through a 3-stage pipeline:
+    
+    **Stage 1 (Transcription):** Voice audio → English text
+        - Uses Whisper backend to transcribe/translate audio to English
+        - Output: English text (transcription)
+        
+    **Stage 2 (Translation):** English text → target language text
+        - Only if text_translation_target is specified and != "en"
+        - Uses Google Translate, LibreTranslate, or local AI model
+        - Output: Translated text in target language
+        
+    **Stage 3 (TTS):** Text → Voice audio
+        - Only if TTS output is requested (scribe_tts_segments or slate_tts_segments)
+        - Uses gTTS or Piper to synthesize speech
+        - Output: Audio in appropriate language
 
     Parameters
     ----------
@@ -82,8 +96,17 @@ def process_audio_chunk(
         Per-stream mutable state (TTS segments, timing stats, logging, etc.).
     mqtt : MQTTConfig or None
         MQTT broker settings. ``None`` disables MQTT output.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+        - ``output``: Final formatted output text (str or None)
+        - ``scribe``: Scribe text output (English transcription, str or None)
+        - ``slate``: Slate text output (translated text, str or None)
+        - ``final_lang``: Language code of the final output text (str or None)
     """
-    # ---- unpack config for local use so existing body still works -------
+    # ---- unpack config for local use so existing body still works -----
     input_lang = config.input_lang
     output_lang = config.output_lang
     magnitude_threshold = config.magnitude_threshold
@@ -124,129 +147,7 @@ def process_audio_chunk(
         mqtt_username = None
         mqtt_password = None
         mqtt_topic = None
-    """
-    Process an audio chunk through a 3-stage pipeline:
-    
-    **Stage 1 (Transcription):** Voice audio → English text
-        - Uses Whisper backend to transcribe/translate audio to English
-        - Output: English text (transcription)
-        
-    **Stage 2 (Translation):** English text → target language text
-        - Only if text_translation_target is specified and != "en"
-        - Uses Google Translate, LibreTranslate, or local AI model
-        - Output: Translated text in target language
-        
-    **Stage 3 (TTS):** Text → Voice audio
-        - Only if TTS output is requested (scribe_tts_segments or slate_tts_segments)
-        - Uses gTTS or Piper to synthesize speech
-        - Output: Audio in appropriate language
 
-    This function is safe to call from both streaming/web contexts and non-web contexts.
-    All side-effecting outputs (TTS, MQTT, logging, etc.) are controlled via arguments.
-
-    Parameters
-    ----------
-    audio_segment : np.ndarray
-        1‑D array of raw PCM audio samples (typically int16 or float) for the chunk
-        to process.
-    rate : int
-        Sample rate in Hz for ``audio_segment``.
-    input_lang : str or None
-        Optional input language code (e.g. ``"en"``, ``"de"``, ``"auto"``). If
-        ``None`` or ``"auto"``, the backend may perform language detection.
-    output_lang : str or None
-        Target language code for translation or transcription. If ``None``, the
-        backend may choose a sensible default (often the detected input language).
-    magnitude_threshold : float
-        Minimum mean absolute magnitude of the audio chunk required to consider it
-        as non‑silence before applying optional VAD.
-    model : str or None
-        Name of the speech/translation model to use. If ``None``, a default
-        (currently ``"medium"``) is used.
-    verbose : bool
-        If ``True``, print diagnostic information about magnitude, VAD, and
-        translation progress.
-    mqtt_broker : str or None
-        Hostname or IP address of the MQTT broker. If ``None``, no MQTT messages are
-        published.
-    mqtt_port : int or None
-        Port number for the MQTT broker. Ignored if ``mqtt_broker`` is ``None``.
-    mqtt_username : str or None
-        Optional username for authenticating with the MQTT broker.
-    mqtt_password : str or None
-        Optional password for authenticating with the MQTT broker.
-    mqtt_topic : str or None
-        Topic to which translated text should be published. If ``None`` or empty,
-        MQTT publishing is skipped even if a broker is configured.
-    stream_id : str or int or None, optional
-        Identifier for the current audio stream or session. Used only for logging
-        and debugging output; may be ``None`` if not needed.
-    scribe_vad : bool, optional
-        If ``True`` and Silero VAD is available, run voice activity detection to
-        further filter out non‑speech segments after the magnitude check.
-    voice_backend : str, optional
-        TTS backend to use, either ``"piper"`` or ``"gtts"`` (default: ``"gtts"``).
-    voice_model : str or None, optional
-        Voice model name for TTS. Used as the Piper voice when ``voice_backend`` is
-        ``"piper"``.
-    chat_logger : callable or object or None, optional
-        Optional logger used to record recognized/translated text for chat or UI
-        purposes. This is typically a callable taking the formatted text (and
-        possibly additional context), or an object exposing an equivalent logging
-        method. If ``None``, no chat logging is performed.
-    rtsp_ip : str or None, optional
-        Optional IP or URL associated with an RTSP source. Used only for contextual
-        labeling or logging; does not affect translation logic.
-    timers : bool, optional
-        If ``True``, collect timing information for different processing stages
-        (magnitude, VAD, translation, TTS, etc.) and store it in ``timing_stats``.
-    timing_stats : dict or None, optional
-        Optional dictionary used to accumulate timing statistics across multiple
-        calls. When provided and ``timers`` is ``True``, per‑stage timings are added
-        via :func:`add_timing`.
-    scribe_backend : str, optional
-        Preference for the whisper/transcription backend, e.g. ``"auto"`` to let the
-        system choose, or a specific backend name if multiple implementations are
-        available.
-    text_translation_target : str or None, optional
-        Target language code for Stage 2 text-to-text translation. If ``None`` or
-        ``"en"``, Stage 2 is skipped and English transcription is used directly.
-    slate_backend : str, optional
-        Backend for Stage 2 translation: ``"googletrans"``, ``"libretranslate"``,
-        or ``"none"``. Default is ``"googletrans"``.
-    voice_lang : str or None, optional
-        Override for Stage 3 TTS language. If ``None``, uses ``text_translation_target``
-        or falls back to ``output_lang``.
-
-    Returns
-    -------
-    str or None
-        The formatted output text (including a language prefix as produced by
-        :func:`build_output_prefix`) from the final stage of the pipeline.
-        
-        - If Stage 2 ran: Returns translated text in target language
-        - If Stage 2 skipped: Returns English transcription from Stage 1
-        - Returns ``None`` if the chunk is silence or translation fails
-
-    Side Effects
-    ------------
-    - May perform VAD to skip non-speech audio
-    - May synthesize TTS audio and append to ``scribe_tts_segments`` or ``slate_tts_segments``
-    - May publish translated text over MQTT (if ``mqtt_broker`` configured)
-    - May log text via ``chat_logger`` (if provided)
-    - May update ``timing_stats`` with per-stage timing information (if ``timers=True``)
-    
-    Notes
-    -----
-    Timing keys when ``timers=True``:
-    - ``magnitude``: Magnitude calculation
-    - ``vad``: Voice activity detection (if enabled)
-    - ``stage1_transcription``: Whisper audio transcription to English
-    - ``stage2_translation``: Text-to-text translation (if target != en)
-    - ``stage3_tts_synthesis``: TTS audio synthesis (if requested)
-    - ``stage3_tts_playback``: TTS audio playback (if requested)
-    - ``text_out``, ``mqtt``, ``chat_log``, ``tts_append``: Output operations
-    """
     timings = [] if timers else None
     t0 = time.perf_counter()
     magnitude = np.abs(audio_segment).mean()
@@ -270,9 +171,9 @@ def process_audio_chunk(
             print(f"{prefix}Silence detected, skipping...")
         return None
 
-    # ============================================================================
+    # =========================================================================
     # STAGE 1: VOICE TRANSCRIPTION TO ENGLISH TEXT
-    # ============================================================================
+    # =========================================================================
     # Uses Whisper backend (whispercpp, faster-whisper, whisper-ctranslate2, or gemma4)
     # to transcribe/translate audio to English text.
     # Output: english_text (Stage 1 result)
@@ -290,9 +191,9 @@ def process_audio_chunk(
             print(f"{prefix}  - Original input_lang: {input_lang}")
             print(f"{prefix}  - Using for Whisper: None (auto-detect)")
     
-    # ========================================================================
+    # =========================================================================
     # GEMMA4 COMBINED ONE-PASS OPTIMIZATION
-    # ========================================================================
+    # =========================================================================
     # When both scribe and slate backends are gemma4 using the same model,
     # perform transcription + translation in a single inference pass so the
     # English pivot is not required.
@@ -373,9 +274,9 @@ def process_audio_chunk(
             print(f"{prefix}  - Detected language: {detected_lang}")
             print(f"{prefix}  - Transcription complete")
 
-    # ============================================================================
+    # =========================================================================
     # LANGSWAP: AUTOMATIC LANGUAGE DETECTION AND TARGET SWITCHING
-    # ============================================================================
+    # =========================================================================
     # If LangSwap is enabled, automatically determine the translation target
     # based on the detected input language. This enables bidirectional translation
     # where both input and output languages can be spoken, and the system
@@ -390,14 +291,14 @@ def process_audio_chunk(
         input_base = normalize_lang_code(langswap_input_lang)
         output_base = normalize_lang_code(langswap_output_lang)
         
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
         print(f"{prefix}LANGSWAP ENABLED - Bidirectional Translation Active")
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
         print(f"{prefix}Detected Language:    {detected_lang} -> normalized: {detected_base}")
         print(f"{prefix}Input Language:       {langswap_input_lang} -> normalized: {input_base}")
         print(f"{prefix}Output Language:      {langswap_output_lang} -> normalized: {output_base}")
         print(f"{prefix}Original Target:      {text_translation_target}")
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
         
         # Store original target for comparison
         original_target = text_translation_target
@@ -426,16 +327,16 @@ def process_audio_chunk(
             print(f"{prefix}NOTE:     This may indicate unexpected language detection")
         
         print(f"{prefix}New Translation Target: {text_translation_target}")
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
     elif langswap_enabled:
         print(f"{prefix}WARNING: LANGSWAP ENABLED but missing configuration:")
         print(f"{prefix}  - Input Lang: {langswap_input_lang}")
         print(f"{prefix}  - Output Lang: {langswap_output_lang}")
         print(f"{prefix}  LangSwap requires both languages to be explicitly set (not 'auto')")
 
-    # ============================================================================
+    # =========================================================================
     # STAGE 2: TEXT-TO-TEXT TRANSLATION (English → Target Language)
-    # ============================================================================
+    # =========================================================================
     # Only runs if text_translation_target is specified and is not English.
     # Skipped when gemma4 one-pass already produced the translated text.
     # Uses googletrans, LibreTranslate, or DeepL for translation.
@@ -507,13 +408,13 @@ def process_audio_chunk(
     prefix = f"[Stream {stream_id}] " if stream_id else ""
     
     if verbose:  # Only print when verbose is True
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
         print(f"{prefix}LANGUAGE DECISION:")
         print(f"{prefix}  stage2_ran={stage2_ran}, langswap_changed_target={langswap_changed_target}")
         print(f"{prefix}  text_translation_target={text_translation_target}")
         print(f"{prefix}  detected_lang={detected_lang}")
         print(f"{prefix}  -> final_text_lang={final_text_lang}")
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
         print(f"{prefix}PIPELINE SUMMARY:")
         if gemma4_one_pass:
             print(f"{prefix}  Stage 1 Output (Gemma4 one-pass): '{combined_text}' [lang: {text_translation_target}]")
@@ -524,11 +425,11 @@ def process_audio_chunk(
         else:
             print(f"{prefix}  Stage 2: SKIPPED")
         print(f"{prefix}  Final Output: '{final_text}' [lang: {final_text_lang}]")
-        print(f"{prefix}========================================================")
+        print(f"{prefix}================================================================")
 
-    # ============================================================================
+    # =========================================================================
     # STAGE 3: TEXT-TO-SPEECH (TTS)
-    # ============================================================================
+    # =========================================================================
     # Synthesizes voice audio from final_text if TTS output is requested.
     # Uses gTTS or Piper. Language determined by voice_lang parameter or final_text_lang.
     
@@ -556,7 +457,7 @@ def process_audio_chunk(
             print(f"{prefix}NOTE: LangSwap changed translation target but Stage 2 was skipped (target is English)")
             print(f"{prefix}  - This means the original target was English, so no text translation occurred")
             print(f"{prefix}  - However, we will still synthesize TTS for the final text language")      
-        
+    
         t0 = time.perf_counter()
         slate_tts_pcm = synthesize_tts_pcm_with_cloning(
             english_text,
@@ -599,7 +500,6 @@ def process_audio_chunk(
             print(f"{prefix}Stage 3 (TTS - Scribe/en): Generated voice audio")
             if scribe_tts_pcm is not None:
                 print(f"{prefix}  - Scribe TTS PCM length: {len(scribe_tts_pcm)} samples")
-                
                 
     # Synthesize slate audio (Translated)
     if stage2_ran and translated_text and slate_tts_segments is not None:
@@ -669,9 +569,9 @@ def process_audio_chunk(
     # Play audio output (if requested)
     # play_audio removed
 
-    # ============================================================================
+    # =========================================================================
     # OUTPUT FORMATTING AND DISTRIBUTION
-    # ============================================================================
+    # =========================================================================
     # Format final text with language prefix and distribute to all requested outputs:
     # - Text file
     # - MQTT broker

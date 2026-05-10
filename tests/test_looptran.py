@@ -1,3 +1,4 @@
+"""Tests for --looptran and --tran-converge in _run_file_pipeline."""
 import os
 import sys
 import tempfile
@@ -35,8 +36,6 @@ _audio_io.output_audio = MagicMock()
 _vad = sys.modules["anytran.vad"]
 _vad.SILERO_AVAILABLE = False
 
-_voice_matcher = sys.modules["anytran.voice_matcher"]
-
 _stream_output = sys.modules["anytran.stream_output"]
 _stream_output.list_wasapi_loopback_devices = MagicMock()
 _stream_output.get_wasapi_loopback_device_info = MagicMock()
@@ -59,7 +58,6 @@ for _runner_mod in [
     setattr(_m, fn_name, MagicMock())
 
 # Stub anytran.runners package itself
-import importlib
 if "anytran.runners" not in sys.modules:
     _runners_pkg = types.ModuleType("anytran.runners")
     sys.modules["anytran.runners"] = _runners_pkg
@@ -122,15 +120,13 @@ import anytran.pipelines as _cli_new
 class _FakeArgs:
     """Minimal args object for testing _run_file_pipeline."""
 
-    def __init__(self, input_path, input_lang, output_lang, slate_text, looptran=0, voice_lang=None, tran_converge=False):
+    def __init__(self, input_path, input_lang, output_lang, slate_text, looptran=0, tran_converge=False):
         self.input = input_path
         self.input_lang = input_lang
         self.output_lang = output_lang
         self.slate_text = slate_text
         self.looptran = looptran
-        self.voice_lang = voice_lang
         # Map bool to the None/int convention used by argparse --tran-converge:
-        # False -> None (disabled), True -> 0 (exact-match threshold)
         if tran_converge is False:
             self.tran_converge = None
         elif tran_converge is True:
@@ -140,40 +136,33 @@ class _FakeArgs:
         self.batch_input_text = False
 
 
-def _make_config(input_lang, output_lang, slate_text):
+def _make_runner_config(input_lang, output_lang, slate_text):
+    """Build a RunnerConfig for the looptran tests."""
+    from anytran.pipeline_config import PipelineConfig, OutputConfig, MQTTConfig, RunnerConfig
     needs_translation = output_lang.lower() != "en"
-    return {
-        "input_lang": input_lang,
-        "output_lang": output_lang,
-        "magnitude_threshold": 0.01,
-        "scribe_voice": None,
-        "slate_voice": None,
-        "model": "tiny",
-        "verbose": False,
-        "mqtt_broker": None,
-        "mqtt_port": 1883,
-        "mqtt_username": None,
-        "mqtt_password": None,
-        "mqtt_topic": "translation",
-        "scribe_vad": False,
-        "voice_backend": "gtts",
-        "voice_model": None,
-        "window_seconds": 5.0,
-        "overlap_seconds": 0.0,
-        "timers": False,
-        "timers_all": False,
-        "scribe_backend": "auto",
-        "text_translation_target": output_lang if needs_translation else None,
-        "slate_backend": "googletrans",
-        "voice_lang": output_lang if needs_translation else "en",
-        "scribe_text": None,
-        "slate_text": slate_text,
-        "voice_match": False,
-        "keep_temp": False,
-        "dedup": False,
-        "lang_prefix": False,
-        "needs_translation": needs_translation,
-    }
+    return RunnerConfig(
+        pipeline=PipelineConfig(
+            input_lang=input_lang,
+            output_lang=output_lang,
+            magnitude_threshold=0.01,
+            model="tiny",
+            verbose=False,
+            scribe_vad=False,
+            scribe_backend="googletrans",
+            slate_backend="googletrans",
+            text_translation_target=output_lang if needs_translation else None,
+            voice_lang=output_lang if needs_translation else "en",
+            keep_temp=False,
+            dedup=False,
+        ),
+        output=OutputConfig(
+            slate_text_file=slate_text,
+        ),
+        mqtt=MQTTConfig(),
+        extra={
+            "looptran": 0,
+        },
+    )
 
 
 class TestLooptran(unittest.TestCase):
@@ -182,7 +171,8 @@ class TestLooptran(unittest.TestCase):
     def _run_pipeline(self, input_path, input_lang, output_lang, slate_text, looptran, mock_rfi, tran_converge=False):
         """Helper: call _run_file_pipeline with mocked run_file_input."""
         args = _FakeArgs(input_path, input_lang, output_lang, slate_text, looptran=looptran, tran_converge=tran_converge)
-        config = _make_config(input_lang, output_lang, slate_text)
+        config = _make_runner_config(input_lang, output_lang, slate_text)
+        config.extra["looptran"] = looptran
         with patch.object(_cli_new, "run_file_input", mock_rfi):
             _cli_new._run_file_pipeline(args, config)
 
@@ -231,7 +221,7 @@ class TestLooptran(unittest.TestCase):
         self.assertEqual(second_call_args[0][0], slate_text)
 
     def test_looptran_second_invocation_swaps_languages(self):
-        """Second invocation swaps input-lang and output-lang."""
+        """Second invocation swaps input-lang and output-lang in runner_cfg."""
         mock_rfi = MagicMock()
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")
@@ -239,10 +229,11 @@ class TestLooptran(unittest.TestCase):
             open(input_path, "w").close()
             self._run_pipeline(input_path, "fr", "es", slate_text, looptran=1, mock_rfi=mock_rfi)
 
-        second_call_args = mock_rfi.call_args_list[1]
-        # Positional args: (input_path, input_lang, output_lang, ...)
-        self.assertEqual(second_call_args[0][1], "es")   # swapped input_lang
-        self.assertEqual(second_call_args[0][2], "fr")   # swapped output_lang
+        # Second call's runner_cfg should have swapped languages
+        second_call = mock_rfi.call_args_list[1]
+        runner_cfg = second_call[0][1]  # second positional arg
+        self.assertEqual(runner_cfg.pipeline.input_lang, "es")
+        self.assertEqual(runner_cfg.pipeline.output_lang, "fr")
 
     def test_looptran_second_invocation_creates_postfix_1_slate(self):
         """Second invocation creates a slate-text file with '_1' postfix."""
@@ -253,9 +244,10 @@ class TestLooptran(unittest.TestCase):
             open(input_path, "w").close()
             self._run_pipeline(input_path, "fr", "es", slate_text, looptran=1, mock_rfi=mock_rfi)
 
-        second_call_kwargs = mock_rfi.call_args_list[1][1]
+        second_call = mock_rfi.call_args_list[1]
+        runner_cfg = second_call[0][1]
         expected_new_slate = os.path.join(os.path.dirname(slate_text), "slate_1.txt")
-        self.assertEqual(second_call_kwargs["slate_text_file"], expected_new_slate)
+        self.assertEqual(runner_cfg.output.slate_text_file, expected_new_slate)
 
     def test_looptran_third_invocation_uses_postfix_1_as_input(self):
         """Third invocation (looptran=2) uses the '_1' slate file as its input."""
@@ -266,9 +258,9 @@ class TestLooptran(unittest.TestCase):
             open(input_path, "w").close()
             self._run_pipeline(input_path, "fr", "es", slate_text, looptran=2, mock_rfi=mock_rfi)
 
-        third_call_args = mock_rfi.call_args_list[2][0]
+        third_call_args = mock_rfi.call_args_list[2]
         expected_input = os.path.join(os.path.dirname(slate_text), "slate_1.txt")
-        self.assertEqual(third_call_args[0], expected_input)
+        self.assertEqual(third_call_args[0][0], expected_input)
 
     def test_looptran_third_invocation_creates_postfix_2_slate(self):
         """Third invocation (looptran=2) creates a slate-text file with '_2' postfix."""
@@ -279,9 +271,10 @@ class TestLooptran(unittest.TestCase):
             open(input_path, "w").close()
             self._run_pipeline(input_path, "fr", "es", slate_text, looptran=2, mock_rfi=mock_rfi)
 
-        third_call_kwargs = mock_rfi.call_args_list[2][1]
+        third_call = mock_rfi.call_args_list[2]
+        runner_cfg = third_call[0][1]
         expected_new_slate = os.path.join(os.path.dirname(slate_text), "slate_2.txt")
-        self.assertEqual(third_call_kwargs["slate_text_file"], expected_new_slate)
+        self.assertEqual(runner_cfg.output.slate_text_file, expected_new_slate)
 
     def test_looptran_skipped_for_audio_input(self):
         """looptran is skipped when input file is not a text file."""
@@ -318,18 +311,20 @@ class TestTranConverge(unittest.TestCase):
     """Tests for the --tran-converge option in _run_file_pipeline."""
 
     def _run_pipeline_converge(self, input_path, input_lang, output_lang, slate_text, looptran, mock_rfi,
-                                slate_file_contents=None):
+                               slate_file_contents=None):
         """Helper: run pipeline with --tran-converge, writing file contents after each mock call."""
         args = _FakeArgs(input_path, input_lang, output_lang, slate_text, looptran=looptran, tran_converge=True)
-        config = _make_config(input_lang, output_lang, slate_text)
+        config = _make_runner_config(input_lang, output_lang, slate_text)
+        config.extra["looptran"] = looptran
+        config.extra["tran_converge"] = 0
 
         call_count = [0]
 
-        def side_effect(*a, **kw):
+        def side_effect(input_path, runner_cfg):
             idx = call_count[0]
             call_count[0] += 1
             # Write the slate file that this call would have produced
-            slate_path = kw.get("slate_text_file")
+            slate_path = runner_cfg.output.slate_text_file
             if slate_path and slate_file_contents and idx < len(slate_file_contents):
                 with open(slate_path, "w") as f:
                     f.write(slate_file_contents[idx])
@@ -348,12 +343,10 @@ class TestTranConverge(unittest.TestCase):
             open(input_path, "w").close()
             # All 5 calls produce different pairings, no convergence:
             # slate.txt="A", slate_1="B", slate_2="C", slate_3="D", slate_4="E"
-            # Pairs checked: (slate_2 vs slate.txt)="C"vs"A", (slate_3 vs slate_1)="D"vs"B", (slate_4 vs slate_2)="E"vs"C"
             self._run_pipeline_converge(
                 input_path, "fr", "es", slate_text, looptran=4, mock_rfi=mock_rfi,
                 slate_file_contents=["A", "B", "C", "D", "E"],
             )
-        # All 4 loop iterations run (plus the initial call = 5 total)
         self.assertEqual(mock_rfi.call_count, 5)
 
     def test_tran_converge_stops_early_when_files_match(self):
@@ -364,7 +357,6 @@ class TestTranConverge(unittest.TestCase):
             slate_text = os.path.join(tmpdir, "slate.txt")
             open(input_path, "w").close()
             # slate.txt="A", slate_1="B", slate_2="A"  -> convergence at iteration 2
-            # (slate_2 matches slate.txt, both "A")
             self._run_pipeline_converge(
                 input_path, "fr", "es", slate_text, looptran=6, mock_rfi=mock_rfi,
                 slate_file_contents=["A", "B", "A"],
@@ -380,8 +372,7 @@ class TestTranConverge(unittest.TestCase):
             slate_text = os.path.join(tmpdir, "slate.txt")
             open(input_path, "w").close()
             # slate.txt="A", slate_1="B", slate_2="C", slate_3="D", slate_4="C"
-            # Checks: (slate_2="C" vs slate.txt="A")=differ, (slate_3="D" vs slate_1="B")=differ,
-            #         (slate_4="C" vs slate_2="C")=match -> stop at iteration 4
+            # (slate_4 vs slate_2) = "C" vs "C" -> stop at iteration 4
             self._run_pipeline_converge(
                 input_path, "fr", "es", slate_text, looptran=6, mock_rfi=mock_rfi,
                 slate_file_contents=["A", "B", "C", "D", "C"],
@@ -397,15 +388,16 @@ class TestTranConverge(unittest.TestCase):
             slate_text = os.path.join(tmpdir, "slate.txt")
             open(input_path, "w").close()
             args = _FakeArgs(input_path, "fr", "es", slate_text, looptran=4, tran_converge=False)
-            config = _make_config("fr", "es", slate_text)
+            config = _make_runner_config("fr", "es", slate_text)
+            config.extra["looptran"] = 4
 
             call_count = [0]
             contents = ["A", "B", "A", "B", "A"]
 
-            def side_effect(*a, **kw):
+            def side_effect(input_path, runner_cfg):
                 idx = call_count[0]
                 call_count[0] += 1
-                slate_path = kw.get("slate_text_file")
+                slate_path = runner_cfg.output.slate_text_file
                 if slate_path and idx < len(contents):
                     with open(slate_path, "w") as f:
                         f.write(contents[idx])

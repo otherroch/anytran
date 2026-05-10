@@ -22,6 +22,21 @@ def normalize_lang_code(lang_code):
 
 
 def compute_window_params(window_seconds, overlap_seconds, rate):
+    """Compute window size and overlap (hop) in samples.
+
+    Parameters
+    ----------
+    window_seconds : float
+        Window duration in seconds.
+    overlap_seconds : float
+        Overlap duration in seconds.
+    rate : int
+        Sample rate in Hz.
+
+    Returns
+    -------
+    (window_samples, overlap_samples) : tuple of int
+    """
     window_samples = max(1, int(window_seconds * rate))
     overlap_samples = max(0, int(overlap_seconds * rate))
     if overlap_samples >= window_samples:

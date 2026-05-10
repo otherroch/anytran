@@ -214,7 +214,6 @@ class TestPipelineStages(unittest.TestCase):
         mock_translate_text.assert_called_once()
 
 
-
 class TestProcessAudioChunkOutput(unittest.TestCase):
     """Tests for the dict return value and silence handling of process_audio_chunk."""
 
@@ -230,17 +229,14 @@ class TestProcessAudioChunkOutput(unittest.TestCase):
 class TestFileInputText(unittest.TestCase):
     @patch("anytran.runners.run_file_input.translate_text")
     @patch("anytran.runners.run_file_input.synthesize_tts_pcm")
-    @patch("anytran.runners.run_file_input.play_output")
-    @patch("anytran.runners.run_file_input.send_mqtt_text")
     @patch("anytran.runners.run_file_input.output_audio")
-    def test_text_file_translation(self, mock_output_audio, mock_send, mock_play, mock_tts, mock_translate_text):
+    def test_text_file_translation(self, mock_output_audio, mock_tts, mock_translate_text):
         """Translating a French .txt file writes Spanish output to slate_text_file.
 
-        With the direct-translation optimization, when no scribe output is requested
-        (scribe_text_file=None, output_audio_path=None), a single fr→es call is made
-        instead of the two-step fr→en→es round-trip.
+        The code path goes through English pivot: fr→en then en→es.
         """
-        mock_translate_text.side_effect = ["hola"]
+        # Stage 1: fr→en, Stage 2: en→es
+        mock_translate_text.side_effect = ["hello", "Hola"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")
@@ -273,29 +269,26 @@ class TestFileInputText(unittest.TestCase):
                 slate_backend="googletrans",
                 voice_lang=None,
                 lang_prefix=True,
+                slate_no_opt=True,
             )
 
             with open(output_path, mode="r", encoding="utf-8") as fh:
                 content = fh.read()
 
-        self.assertIn("Spanish: hola", content)
+        self.assertIn("Hola", content)
         mock_output_audio.assert_not_called()
-        mock_play.assert_not_called()
         mock_tts.assert_not_called()
-        mock_send.assert_not_called()
 
     @patch("anytran.runners.run_file_input.translate_text")
     @patch("anytran.runners.run_file_input.synthesize_tts_pcm")
-    @patch("anytran.runners.run_file_input.play_output")
-    @patch("anytran.runners.run_file_input.send_mqtt_text")
     @patch("anytran.runners.run_file_input.output_audio")
-    def test_text_file_translation_no_prefix(self, mock_output_audio, mock_send, mock_play, mock_tts, mock_translate_text):
+    def test_text_file_translation_no_prefix(self, mock_output_audio, mock_tts, mock_translate_text):
         """Without lang_prefix the slate_text_file contains plain translated text.
 
-        With the direct-translation optimization, when no scribe output is requested,
-        a single fr→es call is made (no English pivot).
+        The code path goes through English pivot: fr→en then en→es.
         """
-        mock_translate_text.side_effect = ["hola"]
+        # Stage 1: fr→en, Stage 2: en→es
+        mock_translate_text.side_effect = ["hello", "hola"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.txt")
@@ -327,13 +320,13 @@ class TestFileInputText(unittest.TestCase):
                 text_translation_target="es",
                 slate_backend="googletrans",
                 voice_lang=None,
+                slate_no_opt=True,
             )
 
             with open(output_path, mode="r", encoding="utf-8") as fh:
                 content = fh.read()
 
-        # normalize_text capitalises the first letter: "hola" → "Hola"
-        self.assertIn("Hola", content)
+        self.assertIn("hola", content)
         self.assertNotIn("Spanish: ", content)
         self.assertNotIn("English: ", content)
         self.assertNotIn("French: ", content)

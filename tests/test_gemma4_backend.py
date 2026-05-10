@@ -386,7 +386,7 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E4B-it"):
             from anytran.processing import process_audio_chunk
-            from anytran.pipeline_config import PipelineConfig
+            from anytran.pipeline_config import PipelineConfig, StreamContext
             result = process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -400,6 +400,7 @@ class TestGemma4OnePass(unittest.TestCase):
                     slate_backend="gemma4",
                     text_translation_target="fr",
                 ),
+                ctx=StreamContext(),
             )
             # One-pass function should be called
             mock_combined.assert_called_once()
@@ -422,7 +423,7 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E2B-it"):
             from anytran.processing import process_audio_chunk
-            from anytran.pipeline_config import PipelineConfig
+            from anytran.pipeline_config import PipelineConfig, StreamContext
             result = process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -436,6 +437,7 @@ class TestGemma4OnePass(unittest.TestCase):
                     slate_backend="gemma4",
                     text_translation_target="fr",
                 ),
+                ctx=StreamContext(),
             )
             # One-pass should NOT be called because models differ
             mock_combined.assert_not_called()
@@ -450,7 +452,7 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E4B-it"):
             from anytran.processing import process_audio_chunk
-            from anytran.pipeline_config import PipelineConfig
+            from anytran.pipeline_config import PipelineConfig, StreamContext
             result = process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -464,6 +466,7 @@ class TestGemma4OnePass(unittest.TestCase):
                     slate_backend="gemma4",
                     text_translation_target="en",
                 ),
+                ctx=StreamContext(),
             )
             # One-pass should NOT be called because target is English
             mock_combined.assert_not_called()

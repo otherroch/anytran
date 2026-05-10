@@ -380,8 +380,8 @@ class TestConfigToml(unittest.TestCase):
 
             captured_args = {}
 
-            def fake_run_file_input(path, input_lang, output_lang, *args, **kwargs):
-                captured_args["output_lang"] = output_lang
+            def fake_run_file_input(path, cfg, *args, **kwargs):
+                captured_args["output_lang"] = cfg.pipeline.output_lang
 
             with patch("sys.argv", ["anytran", "--config", cfg_path]):
                 with patch("anytran.pipelines.run_file_input", fake_run_file_input):
@@ -409,8 +409,8 @@ class TestConfigToml(unittest.TestCase):
 
             captured_args = {}
 
-            def fake_run_file_input(path, input_lang, output_lang, *args, **kwargs):
-                captured_args["output_lang"] = output_lang
+            def fake_run_file_input(path, cfg, *args, **kwargs):
+                captured_args["output_lang"] = cfg.pipeline.output_lang
 
             with patch("sys.argv", [
                 "anytran", "--config", cfg_path, "--output-lang", "ja",
@@ -608,8 +608,8 @@ class TestConfigOption(unittest.TestCase):
 
             captured_args = {}
 
-            def fake_run_file_input(path, input_lang, output_lang, *args, **kwargs):
-                captured_args["output_lang"] = output_lang
+            def fake_run_file_input(path, cfg, *args, **kwargs):
+                captured_args["output_lang"] = cfg.pipeline.output_lang
 
             with patch("sys.argv", ["anytran", "--config", cfg_path]):
                 with patch("anytran.pipelines.run_file_input", fake_run_file_input):
@@ -636,8 +636,8 @@ class TestConfigOption(unittest.TestCase):
 
             captured_args = {}
 
-            def fake_run_file_input(path, input_lang, output_lang, *args, **kwargs):
-                captured_args["output_lang"] = output_lang
+            def fake_run_file_input(path, cfg, *args, **kwargs):
+                captured_args["output_lang"] = cfg.pipeline.output_lang
 
             with patch("sys.argv", [
                 "anytran", "--config", cfg_path, "--output-lang", "de",

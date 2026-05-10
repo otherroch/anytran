@@ -3,11 +3,11 @@ import os
 import signal
 import base64
 
-
 import numpy as np
 
 from .config import get_whisper_backend
 from .mqtt_client import init_mqtt
+from .pipeline_config import MQTTConfig, OutputConfig, PipelineConfig, RunnerConfig, StreamContext
 from .processing import process_audio_chunk
 from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
@@ -27,37 +27,7 @@ def _serialize_tts_segments(segments, rate):
         payloads.append({"type": "tts_audio", "pcm": encoded, "rate": rate})
     return payloads
 
-def run_web_server(
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    host="0.0.0.0",
-    port=8000,
-    ssl_certfile=None,
-    ssl_keyfile=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    slate_backend="googletrans",
-    dedup=False,
-    keep_temp=False,
-    lang_prefix=False,
-    voice_backend=None,
-    voice_model=None,
-    voice_match=False,
-    capture_voice_path=None,
-):
+def run_web_server(runner_cfg: RunnerConfig):
     """
     Start the real-time translation web server.
 
@@ -68,13 +38,13 @@ def run_web_server(
 
     Parameters
     ----------
-    input_lang : str or None, optional
-        Default input language code for recognition. If ``None`` or
-        ``"auto"``, the server will attempt to automatically detect the
-        spoken language.
-    output_lang : str or None, optional
-        Default output language code for translation. If ``None``, a
-        reasonable default such as English is used.
+    runner_cfg : RunnerConfig
+        Combined runner configuration containing pipeline, output, mqtt,
+        and extra settings.  Runner-specific extras:
+        * ``web_host`` : str  - bind host (default ``0.0.0.0``).
+        * ``web_port`` : int  - bind port (default ``8000``).
+        * ``web_ssl_cert`` : str or None  - SSL certificate path.
+        * ``web_ssl_key`` : str or None  - SSL private key path.
 
     Returns
     -------
@@ -99,6 +69,45 @@ def run_web_server(
         name or model file base name). See the Piper documentation for the
         list of supported voices and installation instructions.
     """
+    pipeline = runner_cfg.pipeline
+    mqtt = runner_cfg.mqtt
+    extra = runner_cfg.extra
+
+    # -- pipeline parameters ----------------------------------------
+    input_lang = pipeline.input_lang
+    output_lang = pipeline.output_lang
+    magnitude_threshold = pipeline.magnitude_threshold
+    model = pipeline.model
+    verbose = pipeline.verbose
+    scribe_vad = pipeline.scribe_vad
+    window_seconds = pipeline.window_seconds
+    overlap_seconds = pipeline.overlap_seconds
+    timers = pipeline.timers
+    timers_all = pipeline.timers_all
+    scribe_backend = pipeline.scribe_backend
+    slate_backend = pipeline.slate_backend
+    dedup = pipeline.dedup
+    lang_prefix = pipeline.lang_prefix
+    voice_backend = pipeline.voice_backend
+    voice_model = pipeline.voice_model
+    voice_match = pipeline.voice_match
+
+    # -- mqtt parameters --------------------------------------------
+    mqtt_broker = mqtt.broker
+    mqtt_port = mqtt.port
+    mqtt_username = mqtt.username
+    mqtt_password = mqtt.password
+    mqtt_topic = mqtt.topic
+
+    # -- web server specific parameters -----------------------------
+    host = extra.get("web_host", "0.0.0.0")
+    port = extra.get("web_port", 8000)
+    ssl_certfile = extra.get("web_ssl_cert")
+    ssl_keyfile = extra.get("web_ssl_key")
+
+    # -- capture voice from output config ---------------------------
+    capture_voice_path = runner_cfg.output.capture_voice_path
+
     # Read Piper TTS config from environment variables; see docstring above for details.
     _use_piper = os.environ.get("USE_PIPER", "0").lower() in ("1", "true", "yes")
     if voice_backend is None:
@@ -550,35 +559,41 @@ def run_web_server(
                                 print(f"[web] Using Slate TTS for non-English output")
                             slate_tts_segments = []
                       
-                    translated_text = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        current_input_lang,
-                        current_output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
-                        stream_id="web",
+                    # Build per-call config from pipeline defaults + session state
+                    call_config = PipelineConfig(
+                        input_lang=current_input_lang,
+                        output_lang=current_output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
                         voice_model=voice_model,
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
                         timers=timers,
-                        timing_stats=timing_stats,
                         scribe_backend=scribe_backend,
                         slate_backend=slate_backend,
                         text_translation_target=current_output_lang,
                         langswap_enabled=langswap_enabled,
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
-                        slate_tts_segments=slate_tts_segments,
+                    )
+                    call_ctx = StreamContext(
+                        stream_id="web",
+                        timing_stats=timing_stats,
                         scribe_tts_segments=scribe_tts_segments,
+                        slate_tts_segments=slate_tts_segments,
+                    )
+                    call_mqtt = MQTTConfig(
+                        broker=mqtt_broker,
+                        port=mqtt_port,
+                        username=mqtt_username,
+                        password=mqtt_password,
+                        topic=mqtt_topic,
+                    ) if mqtt_broker else None
+                    translated_text = process_audio_chunk(
+                        audio_segment, rate, call_config, call_ctx, call_mqtt
                     )
                     if translated_text:
                         # process_audio_chunk returns a dict with 'output', 'scribe', 'slate', and 'final_lang' keys

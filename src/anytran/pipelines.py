@@ -3,288 +3,158 @@ import os
 import tempfile
 
 from .normalizer import normalize_text
+from .pipeline_config import MQTTConfig, OutputConfig, PipelineConfig, RunnerConfig
 from .runners import run_file_input, run_multi_rtsp, run_realtime_output, run_realtime_rtsp, run_realtime_youtube
 from .web_server import run_web_server
 
 
-def build_pipeline_config(args):
-    """Build pipeline configuration from arguments."""
+def build_runner_config(args) -> RunnerConfig:
+    """Build a RunnerConfig from CLI arguments.
+
+    Replaces the old dict-based ``build_pipeline_config`` with a single
+    dataclass that bundles all ~30 scalar parameters into coherent groups.
+    """
     # Normalize input_lang (None means auto)
     input_lang = args.input_lang
-    
+
     # Determine if we need translation (Stage 2)
-    # Allow slate options even when output_lang is English
     needs_translation = args.output_lang.lower() != "en"
     output_lang_for_tts = args.output_lang if needs_translation else "en"
-    
-    config = {
-        # Input
-        "input_lang": input_lang,
-        "output_lang": args.output_lang,
-        
-        # Stage 1 outputs (English transcription)
-        "scribe_text": args.scribe_text,
-        "scribe_voice": args.scribe_voice,
-        
-        # Stage 2 outputs (Translation or re-output of Stage 1)
-        # Now allow slate options even when output_lang is English
-        "needs_translation": needs_translation,
-        "slate_text": args.slate_text,
-        "slate_voice": args.slate_voice,
-        
-        # text_output removed (no longer needed)
-        
-        # Backend
-        "model": args.scribe_model,
-        "scribe_backend": args.scribe_backend,
-        "magnitude_threshold": args.magnitude_threshold,
-        
-        # Translation
-        "text_translation_target": args.output_lang if needs_translation else None,
-        "slate_backend": args.slate_backend,
-        
-        # TTS
-        "voice_lang": args.voice_lang or output_lang_for_tts,
-        "voice_backend": args.voice_backend,
-        "voice_model": args.voice_model,
-        "voice_match": args.voice_match,
-        
-        # Audio processing
-        "scribe_vad": args.scribe_vad,
-        "window_seconds": args.window_seconds,
-        "overlap_seconds": args.overlap_seconds,
-        
-        # MQTT
-        "mqtt_broker": args.mqtt_broker,
-        "mqtt_port": args.mqtt_port,
-        "mqtt_username": args.mqtt_username,
-        "mqtt_password": args.mqtt_password,
-        "mqtt_topic": args.mqtt_topic,
-        
-        # Misc
-        "verbose": args.verbose,
-        "timers": args.timers,
-        "timers_all": getattr(args, "timers_all", False),
-        "chat_log_dir": args.chat_log,
-        "keep_temp": getattr(args, "keep_temp", False),
-        "dedup": getattr(args, "dedup", False),
-        "lang_prefix": getattr(args, "lang_prefix", False),
-        "normalize": not getattr(args, "no_norm", False),
+
+    # Determine output paths (only strings, not True/False flags)
+    scribe_voice_path = args.scribe_voice if isinstance(args.scribe_voice, str) else None
+    slate_voice_path = args.slate_voice if isinstance(args.slate_voice, str) else None
+
+    pipeline = PipelineConfig(
+        input_lang=input_lang,
+        output_lang=args.output_lang,
+        text_translation_target=args.output_lang if needs_translation else None,
+        model=args.scribe_model,
+        magnitude_threshold=args.magnitude_threshold,
+        scribe_vad=args.scribe_vad,
+        window_seconds=args.window_seconds,
+        overlap_seconds=args.overlap_seconds,
+        scribe_backend=args.scribe_backend,
+        slate_backend=args.slate_backend,
+        voice_backend=args.voice_backend,
+        voice_model=args.voice_model,
+        voice_lang=args.voice_lang or output_lang_for_tts,
+        voice_match=args.voice_match,
+        lang_prefix=getattr(args, "lang_prefix", False),
+        normalize=not getattr(args, "no_norm", False),
+        dedup=getattr(args, "dedup", False),
+        slate_no_opt=getattr(args, "slate_no_opt", False),
+        verbose=args.verbose,
+        timers=args.timers,
+        timers_all=getattr(args, "timers_all", False),
+        keep_temp=getattr(args, "keep_temp", False),
+    )
+
+    output_cfg = OutputConfig(
+        output_audio_path=scribe_voice_path,
+        slate_audio_path=slate_voice_path,
+        scribe_text_file=args.scribe_text,
+        slate_text_file=args.slate_text,
+        capture_voice_path=getattr(args, "capture_voice", None),
+        chat_log_dir=args.chat_log,
+    )
+
+    mqtt = MQTTConfig(
+        broker=args.mqtt_broker,
+        port=args.mqtt_port,
+        username=args.mqtt_username,
+        password=args.mqtt_password,
+        topic=args.mqtt_topic,
+    )
+
+    extra = {
+        # Web server specific
+        "web_host": args.web_host,
+        "web_port": args.web_port,
+        "web_ssl_cert": args.web_ssl_cert,
+        "web_ssl_key": args.web_ssl_key,
+        # YouTube specific
+        "youtube_api_key": args.youtube_api_key,
+        "youtube_js_runtime": args.youtube_js_runtime,
+        "youtube_remote_components": args.youtube_remote_components,
+        # Output specific
+        "output_device": args.output_device,
+        # File specific
+        "batch_input_text": getattr(args, "batch_input_text", 0),
+        # Normalize input text files
         "normalize_input": not getattr(args, "no_input_norm", False),
-        "slate_no_opt": getattr(args, "slate_no_opt", False),
-
-        # Capture original input voice
-        "capture_voice": getattr(args, "capture_voice", None),
+        # LoopTran specific
+        "looptran": getattr(args, "looptran", 0),
+        "tran_converge": getattr(args, "tran_converge", None),
     }
-    
-    return config
+
+    return RunnerConfig(pipeline=pipeline, output=output_cfg, mqtt=mqtt, extra=extra)
 
 
-def execute_pipeline(args, config):
-    """Execute the appropriate pipeline based on input source."""
-    
+# Legacy alias for backward compatibility
+def build_pipeline_config(args):
+    """Deprecated alias for build_runner_config."""
+    return build_runner_config(args)
+
+
+def execute_pipeline(args, runner_cfg):
+    """Execute the appropriate pipeline based on input source.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        CLI arguments.
+    runner_cfg : RunnerConfig
+        Configuration bundle (from ``build_runner_config``).
+    """
+
     if args.web:
-        return _run_web_pipeline(args, config)
+        return _run_web_pipeline(args, runner_cfg)
     elif args.from_output:
-        return _run_output_pipeline(args, config)
+        return _run_output_pipeline(args, runner_cfg)
     elif args.youtube_url:
-        return _run_youtube_pipeline(args, config)
+        return _run_youtube_pipeline(args, runner_cfg)
     elif args.rtsp:
-        return _run_rtsp_pipeline(args, config)
+        return _run_rtsp_pipeline(args, runner_cfg)
     elif args.input:
-        return _run_file_pipeline(args, config)
+        return _run_file_pipeline(args, runner_cfg)
     else:
         print("Error: No input source specified")
         return 1
 
 
-def _run_web_pipeline(args, config):
+def _run_web_pipeline(args, runner_cfg):
     """Run web server pipeline."""
-    run_web_server(
-        config["input_lang"],
-        config["output_lang"],
-        config["magnitude_threshold"],
-        model=config["model"],
-        verbose=config["verbose"],
-        mqtt_broker=config["mqtt_broker"],
-        mqtt_port=config["mqtt_port"],
-        mqtt_username=config["mqtt_username"],
-        mqtt_password=config["mqtt_password"],
-        mqtt_topic=config["mqtt_topic"],
-        scribe_vad=config["scribe_vad"],
-        host=args.web_host,
-        port=args.web_port,
-        ssl_certfile=args.web_ssl_cert,
-        ssl_keyfile=args.web_ssl_key,
-        window_seconds=config["window_seconds"],
-        overlap_seconds=config["overlap_seconds"],
-        timers=config["timers"],
-        timers_all=config["timers_all"],
-        scribe_backend=config["scribe_backend"],
-        slate_backend=config["slate_backend"],
-        dedup=config["dedup"],
-        lang_prefix=config["lang_prefix"],
-        voice_backend=config["voice_backend"],
-        voice_model=config["voice_model"],
-        voice_match=config["voice_match"],
-        capture_voice_path=config.get("capture_voice"),
-    )
+    run_web_server(runner_cfg)
     return 0
 
 
-def _run_output_pipeline(args, config):
+def _run_output_pipeline(args, runner_cfg):
     """Run system output capture pipeline."""
-    run_realtime_output(
-        config["input_lang"],
-        config["output_lang"],
-        config["magnitude_threshold"],
-        output_audio_path=config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-        slate_audio_path=config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-        model=config["model"],
-        verbose=config["verbose"],
-        mqtt_broker=config["mqtt_broker"],
-        mqtt_port=config["mqtt_port"],
-        mqtt_username=config["mqtt_username"],
-        mqtt_password=config["mqtt_password"],
-        mqtt_topic=config["mqtt_topic"],
-        scribe_vad=config["scribe_vad"],
-        voice_backend=config["voice_backend"],
-        voice_model=config["voice_model"],
-        output_device=args.output_device,
-        window_seconds=config["window_seconds"],
-        overlap_seconds=config["overlap_seconds"],
-        timers=config["timers"],
-        timers_all=config["timers_all"],
-        scribe_backend=config["scribe_backend"],
-        text_translation_target=config["text_translation_target"],
-        slate_backend=config["slate_backend"],
-        voice_lang=config["voice_lang"],
-        scribe_text_file=config["scribe_text"],
-        slate_text_file=config["slate_text"],
-        voice_match=config["voice_match"],
-        dedup=config["dedup"],
-        lang_prefix=config["lang_prefix"],
-        normalize=config.get("normalize", True),
-        capture_voice_path=config.get("capture_voice"),
-    )
+    runner_cfg.extra["output_device"] = args.output_device
+    run_realtime_output(runner_cfg)
     return 0
 
 
-def _run_youtube_pipeline(args, config):
+def _run_youtube_pipeline(args, runner_cfg):
     """Run YouTube streaming pipeline."""
-    run_realtime_youtube(
-        args.youtube_url,
-        args.youtube_api_key,
-        config["input_lang"],
-        config["output_lang"],
-        config["magnitude_threshold"],
-        output_audio_path=config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-        slate_audio_path=config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-        model=config["model"],
-        verbose=config["verbose"],
-        mqtt_broker=config["mqtt_broker"],
-        mqtt_port=config["mqtt_port"],
-        mqtt_username=config["mqtt_username"],
-        mqtt_password=config["mqtt_password"],
-        mqtt_topic=config["mqtt_topic"],
-        scribe_vad=config["scribe_vad"],
-        voice_backend=config["voice_backend"],
-        voice_model=config["voice_model"],
-        youtube_js_runtime=args.youtube_js_runtime,
-        youtube_remote_components=args.youtube_remote_components,
-        window_seconds=config["window_seconds"],
-        overlap_seconds=config["overlap_seconds"],
-        timers=config["timers"],
-        timers_all=config["timers_all"],
-        scribe_backend=config["scribe_backend"],
-        text_translation_target=config["text_translation_target"],
-        slate_backend=config["slate_backend"],
-        voice_lang=config["voice_lang"],
-        scribe_text_file=config["scribe_text"],
-        slate_text_file=config["slate_text"],
-        voice_match=config["voice_match"],
-        dedup=config["dedup"],
-        lang_prefix=config["lang_prefix"],
-        normalize=config.get("normalize", True),
-        capture_voice_path=config.get("capture_voice"),
-    )
+    runner_cfg.extra["youtube_api_key"] = args.youtube_api_key
+    runner_cfg.extra["youtube_js_runtime"] = args.youtube_js_runtime
+    runner_cfg.extra["youtube_remote_components"] = args.youtube_remote_components
+    run_realtime_youtube(args.youtube_url, runner_cfg)
     return 0
 
 
-def _run_rtsp_pipeline(args, config):
+def _run_rtsp_pipeline(args, runner_cfg):
     """Run RTSP streaming pipeline."""
     if len(args.rtsp) == 1:
-        topic = args.mqtt_topic_names[0] if args.mqtt_topic_names else config["mqtt_topic"]
-        run_realtime_rtsp(
-            args.rtsp[0],
-            config["input_lang"],
-            config["output_lang"],
-            config["magnitude_threshold"],
-            output_audio_path=config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-            slate_audio_path=config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-            model=config["model"],
-            verbose=config["verbose"],
-            mqtt_broker=config["mqtt_broker"],
-            mqtt_port=config["mqtt_port"],
-            mqtt_username=config["mqtt_username"],
-            mqtt_password=config["mqtt_password"],
-            mqtt_topic=topic,
-            scribe_vad=config["scribe_vad"],
-            voice_backend=config["voice_backend"],
-            voice_model=config["voice_model"],
-            chat_log_dir=config["chat_log_dir"],
-            window_seconds=config["window_seconds"],
-            overlap_seconds=config["overlap_seconds"],
-            timers=config["timers"],
-            timers_all=config["timers_all"],
-            scribe_backend=config["scribe_backend"],
-            text_translation_target=config["text_translation_target"],
-            slate_backend=config["slate_backend"],
-            voice_lang=config["voice_lang"],
-            scribe_text_file=config["scribe_text"],
-            slate_text_file=config["slate_text"],
-            voice_match=config["voice_match"],
-            dedup=config["dedup"],
-            lang_prefix=config["lang_prefix"],
-            normalize=config.get("normalize", True),
-            capture_voice_path=config.get("capture_voice"),
-        )
+        # Override MQTT topic for single RTSP stream if topic_names provided
+        if args.mqtt_topic_names:
+            runner_cfg.mqtt.topic = args.mqtt_topic_names[0]
+        run_realtime_rtsp(args.rtsp[0], runner_cfg)
     else:
-        run_multi_rtsp(
-            args.rtsp,
-            config["input_lang"],
-            config["output_lang"],
-            config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-            config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-            config["magnitude_threshold"],
-            model=config["model"],
-            verbose=config["verbose"],
-            mqtt_broker=config["mqtt_broker"],
-            mqtt_port=config["mqtt_port"],
-            mqtt_username=config["mqtt_username"],
-            mqtt_password=config["mqtt_password"],
-            mqtt_topic=config["mqtt_topic"],
-            topic_names=args.mqtt_topic_names,
-            scribe_vad=config["scribe_vad"],
-            voice_backend=config["voice_backend"],
-            voice_model=config["voice_model"],
-            chat_log_dir=config["chat_log_dir"],
-            window_seconds=config["window_seconds"],
-            overlap_seconds=config["overlap_seconds"],
-            timers=config["timers"],
-            timers_all=config["timers_all"],
-            scribe_backend=config["scribe_backend"],
-            text_translation_target=config["text_translation_target"],
-            slate_backend=config["slate_backend"],
-            voice_lang=config["voice_lang"],
-            scribe_text_file=config["scribe_text"],
-            slate_text_file=config["slate_text"],
-            voice_match=config["voice_match"],
-            dedup=config["dedup"],
-            lang_prefix=config["lang_prefix"],
-            normalize=config.get("normalize", True),
-            capture_voice_path=config.get("capture_voice"),
-        )
+        runner_cfg.extra["topic_names"] = args.mqtt_topic_names
+        run_multi_rtsp(args.rtsp, runner_cfg)
     return 0
 
 
@@ -325,18 +195,20 @@ def _files_line_differences_with_lines(path_a, path_b):
         return float('inf'), []
 
 
-def _run_file_pipeline(args, config):
+def _run_file_pipeline(args, runner_cfg):
     """Run file-based pipeline (audio or text input)."""
-    
+    pipeline = runner_cfg.pipeline
+    output = runner_cfg.output
+
     input_path = args.input
     is_text_input = input_path and input_path.lower().endswith(".txt")
     temp_input_path = input_path
-    normalize_input = config.get("normalize", True) and config.get("normalize_input", True)
-    verbose = config["verbose"]
-    keep_temp = config.get("keep_temp", False)  
+    normalize_input = pipeline.normalize and runner_cfg.extra.get("normalize_input", True)
+    verbose = pipeline.verbose
+    keep_temp = pipeline.keep_temp
 
-    input_is_temp_file = False  
-    
+    input_is_temp_file = False
+
     if is_text_input and normalize_input:
         try:
             with open(input_path, "r", encoding="utf-8") as infile:
@@ -349,73 +221,38 @@ def _run_file_pipeline(args, config):
                     input_is_temp_file = True
                     if verbose:
                         print(f"Input text file normalized. Using temporary file: {temp_input_path}")
-                        # Show the differing lines with line numbers
                         small_diff_lines, differences = _files_line_differences_with_lines(temp_input_path, input_path)
                         print(f"Small number of differing lines ({small_diff_lines}) detected. Showing up to {MAX_DIFF_LINES_TO_DISPLAY} differing lines:")
                         for idx, a, b in differences[:MAX_DIFF_LINES_TO_DISPLAY]:
                             print(f"    Line {idx}:")
-                            print(f"      {os.path.basename(input_path)}: {b}") 
+                            print(f"      {os.path.basename(input_path)}: {b}")
                             print(f"      {os.path.basename(temp_input_path)}: {a}")
-
-                             
         except Exception as exc:
             print(f"Error normalizing input file: {exc}")
-            
-    # first run with original input (normalized temp file if normalization was applied) - this will produce the initial slate_text output
-    run_file_input(
-        temp_input_path,
-        config["input_lang"],
-        config["output_lang"],
-        config["magnitude_threshold"],
-        output_audio_path=config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-        slate_audio_path=config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-        model=config["model"],
-        verbose=config["verbose"],
-        mqtt_broker=config["mqtt_broker"],
-        mqtt_port=config["mqtt_port"],
-        mqtt_username=config["mqtt_username"],
-        mqtt_password=config["mqtt_password"],
-        mqtt_topic=config["mqtt_topic"],
-        scribe_vad=config["scribe_vad"],
-        voice_backend=config["voice_backend"],
-        voice_model=config["voice_model"],
-        window_seconds=config["window_seconds"],
-        overlap_seconds=config["overlap_seconds"],
-        timers=config["timers"],
-        timers_all=config["timers_all"],
-        scribe_backend=config["scribe_backend"],
-        text_translation_target=config["text_translation_target"],
-        slate_backend=config["slate_backend"],
-        voice_lang=config["voice_lang"],
-        scribe_text_file=config["scribe_text"],
-        slate_text_file=config["slate_text"],
-        voice_match=config["voice_match"],
-        keep_temp=config.get("keep_temp", False),
-        dedup=config["dedup"],
-        lang_prefix=config["lang_prefix"],
-        batch=args.batch_input_text,
-        normalize=config.get("normalize", True),
-        slate_no_opt=config.get("slate_no_opt", False),
-    )
 
-    if input_is_temp_file and not keep_temp:    
+    # First run with original input
+    runner_cfg.pipeline.batch = getattr(args, "batch_input_text", 0)
+    run_file_input(temp_input_path, runner_cfg)
+
+    if input_is_temp_file and not keep_temp:
         try:
             os.remove(temp_input_path)
             if verbose:
                 print(f"Removed temporary normalized input file: {temp_input_path}")
         except OSError as exc:
             print(f"Warning: Unable to remove temporary file '{temp_input_path}': {exc}")
-            
+
     # Handle --looptran: repeat translation with swapped languages for text files
-    looptran_n = getattr(args, "looptran", 0)
-    slate_text = config["slate_text"]
-    input_lang = config["input_lang"]
-    output_lang = config["output_lang"]
+    looptran_n = runner_cfg.extra.get("looptran", 0)
+    slate_text = output.slate_text_file
+    input_lang = pipeline.input_lang
+    output_lang = pipeline.output_lang
 
     tran_converge_flag = False
     tran_converge_diff = 0
-    if args.tran_converge is not None:
-        tran_converge_diff = args.tran_converge
+    tran_converge_val = runner_cfg.extra.get("tran_converge")
+    if tran_converge_val is not None:
+        tran_converge_diff = tran_converge_val
         tran_converge_flag = True
 
     if (
@@ -431,61 +268,32 @@ def _run_file_pipeline(args, config):
         current_input_lang = output_lang
         current_output_lang = input_lang
 
-        scribe_text = config.get("scribe_text")
+        scribe_text = output.scribe_text_file
         if scribe_text:
             scribe_base, scribe_ext = os.path.splitext(scribe_text)
         else:
             scribe_base, scribe_ext = None, None
 
-        # Keep track of output slate paths for convergence comparison (index 0 = initial slate_text)
+        # Keep track of output slate paths for convergence comparison
         output_slate_paths = [slate_text]
 
         for i in range(1, looptran_n + 1):
             new_slate_text = f"{slate_base}_{i}{slate_ext}"
             new_scribe_text = f"{scribe_base}_{i}{scribe_ext}" if scribe_base else None
             needs_translation = current_output_lang.lower() != "en"
-            text_translation_target = current_output_lang if needs_translation else None
-            voice_lang = args.voice_lang or (current_output_lang if needs_translation else "en")
 
-            run_file_input(
-                current_input_path,
-                current_input_lang,
-                current_output_lang,
-                config["magnitude_threshold"],
-                output_audio_path=config["scribe_voice"] if isinstance(config["scribe_voice"], str) else None,
-                slate_audio_path=config["slate_voice"] if isinstance(config["slate_voice"], str) else None,
-                model=config["model"],
-                verbose=config["verbose"],
-                mqtt_broker=config["mqtt_broker"],
-                mqtt_port=config["mqtt_port"],
-                mqtt_username=config["mqtt_username"],
-                mqtt_password=config["mqtt_password"],
-                mqtt_topic=config["mqtt_topic"],
-                scribe_vad=config["scribe_vad"],
-                voice_backend=config["voice_backend"],
-                voice_model=config["voice_model"],
-                window_seconds=config["window_seconds"],
-                overlap_seconds=config["overlap_seconds"],
-                timers=config["timers"],
-                timers_all=config["timers_all"],
-                scribe_backend=config["scribe_backend"],
-                text_translation_target=text_translation_target,
-                slate_backend=config["slate_backend"],
-                voice_lang=voice_lang,
-                scribe_text_file=new_scribe_text,
-                slate_text_file=new_slate_text,
-                voice_match=config["voice_match"],
-                keep_temp=config.get("keep_temp", False),
-                dedup=config["dedup"],
-                lang_prefix=config["lang_prefix"],
-                batch=args.batch_input_text,
-                normalize=config.get("normalize", True),
-                slate_no_opt=config.get("slate_no_opt", False),
-            )
+            # Mutate pipeline config for this iteration
+            runner_cfg.pipeline.input_lang = current_input_lang
+            runner_cfg.pipeline.output_lang = current_output_lang
+            runner_cfg.pipeline.text_translation_target = current_output_lang if needs_translation else None
+            runner_cfg.output.scribe_text_file = new_scribe_text
+            runner_cfg.output.slate_text_file = new_slate_text
+
+            run_file_input(current_input_path, runner_cfg)
 
             output_slate_paths.append(new_slate_text)
 
-            # Check for convergence: compare this output with the one two steps back (same language)
+            # Check for convergence
             if tran_converge_flag and i >= 2:
                 prev_same_lang_path = output_slate_paths[i - 2]
                 diff_lines = _files_line_difference(new_slate_text, prev_same_lang_path)
@@ -493,16 +301,15 @@ def _run_file_pipeline(args, config):
                 print(
                     f"[tran-converge] Iteration {i}: '{new_slate_text}' vs '{prev_same_lang_path}' differ by {diff_lines} lines (threshold={threshold})."
                 )
- 
+
                 if diff_lines < MAX_DIFF_LINES_TO_DISPLAY:
-                    # Show the differing lines with line numbers
                     small_diff_lines, differences = _files_line_differences_with_lines(new_slate_text, prev_same_lang_path)
                     if small_diff_lines > 0:
-                         if small_diff_lines <= MAX_DIFF_LINES_TO_DISPLAY:
+                        if small_diff_lines <= MAX_DIFF_LINES_TO_DISPLAY:
                             print(f"small number of differing lines ({small_diff_lines}) detected :")
-                         else:
+                        else:
                             print(f"large number of differing lines ({small_diff_lines}) detected. Showing up to {MAX_DIFF_LINES_TO_DISPLAY} differing lines:")
-                         for idx, a, b in differences:
+                        for idx, a, b in differences:
                             print(f"    Line {idx}:")
                             print(f"      {os.path.basename(new_slate_text)}: {a}")
                             print(f"      {os.path.basename(prev_same_lang_path)}: {b}")
@@ -513,7 +320,7 @@ def _run_file_pipeline(args, config):
                     )
                     break
 
-            # For next pass, swap languages and use new files as input
+            # For next pass, swap languages
             current_input_lang, current_output_lang = current_output_lang, current_input_lang
             current_input_path = new_slate_text
 

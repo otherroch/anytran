@@ -10,17 +10,18 @@ import time
 
 import numpy as np
 
-from ..pipeline_config import MQTTConfig, PipelineConfig, OutputConfig, RunnerConfig, StreamContext
-from ..stream_output import (
-    compute_window_params,
-    init_mqtt,
-    normalize_text,
-    output_audio,
-)
+from ..pipeline_config import RunnerConfig, StreamContext
+from ..utils import compute_window_params
+from ..mqtt_client import init_mqtt
+from ..normalizer import normalize_text
+from ..audio_io import output_audio
+from ..stream_output import get_wasapi_loopback_device_info
+from ..processing import process_audio_chunk
 
 
 def run_realtime_output(
-    cfg: RunnerConfig,
+    cfg: "RunnerConfig" = None,
+    **kwargs,
 ):
     """Run the pipeline on Windows WASAPI loopback audio.
 
@@ -29,7 +30,13 @@ def run_realtime_output(
     cfg : RunnerConfig
         Combined runner configuration.  Runner-specific extras:
         * ``output_device`` : str or None  - WASAPI device id override.
+        If not provided, individual keyword arguments are accepted for
+        backward compatibility.
+    **kwargs : dict
+        Legacy individual keyword arguments.
     """
+    if cfg is None:
+        cfg = RunnerConfig._from_kwargs(**kwargs)
     pipeline = cfg.pipeline
     output = cfg.output
     mqtt = cfg.mqtt
@@ -167,15 +174,13 @@ def run_realtime_output(
 
 # ------ Helpers ------
 
-def _process_chunk(chunk, sample_rate, pipeline, stream_ctx, mqtt_client):
-    from ..stream_output import process_audio_chunk
-
+def _process_chunk(chunk, sample_rate, pipeline, stream_ctx, mqtt_cfg):
     return process_audio_chunk(
         chunk,
         sample_rate,
-        pipeline_cfg=pipeline,
-        stream_ctx=stream_ctx,
-        mqtt_cfg=MQTTConfig() if mqtt_client else None,
+        pipeline,
+        stream_ctx,
+        mqtt_cfg,
     )
 
 

@@ -13,7 +13,7 @@ from unittest import mock
 from anytran import processing
 from anytran import config as anytran_config
 from anytran import whisper_backend
-from anytran.pipeline_config import PipelineConfig
+from anytran.pipeline_config import PipelineConfig, StreamContext
 
 
 @pytest.fixture(autouse=True)
@@ -109,14 +109,17 @@ def test_cross_language_voice_cloning_translates_ref_text(mock_translate_audio, 
         langswap_output_lang=None,
     )
 
+    ctx = StreamContext(
+        stream_id=None,
+        timing_stats=None,
+        slate_tts_segments=slate_tts_segments,
+    )
     # Process with voice cloning enabled for English → French translation
     result = processing.process_audio_chunk(
         audio_segment,
         16000,
         config,
-        stream_id=None,
-        timing_stats=None,
-        slate_tts_segments=slate_tts_segments,
+        ctx,
     )
     
     # Should have generated slate audio (French)
@@ -207,14 +210,17 @@ def test_same_language_voice_cloning_with_ref_text(mock_translate_audio, mock_tr
         langswap_output_lang=None,
     )
 
+    ctx2 = StreamContext(
+        stream_id=None,
+        timing_stats=None,
+        slate_tts_segments=slate_tts_segments,
+    )
     # Process with voice cloning enabled for English → English (same language)
     result = processing.process_audio_chunk(
         audio_segment,
         16000,
         config,
-        stream_id=None,
-        timing_stats=None,
-        slate_tts_segments=slate_tts_segments,
+        ctx2,
     )
     
     # When target is English, stage2 doesn't run, so slate synthesis happens via langswap path
