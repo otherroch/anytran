@@ -386,22 +386,18 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E4B-it"):
             from anytran.processing import process_audio_chunk
-            result = process_audio_chunk(
-                audio_segment=audio,
-                rate=16000,
-                input_lang=None,
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
                 output_lang="fr",
                 magnitude_threshold=0.001,
-                model=None,
-                verbose=False,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
                 scribe_backend="gemma4",
                 slate_backend="gemma4",
                 text_translation_target="fr",
+            )
+            result = process_audio_chunk(
+                audio_segment=audio,
+                rate=16000,
+                config=cfg,
             )
             # One-pass function should be called
             mock_combined.assert_called_once()
@@ -424,22 +420,18 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E2B-it"):
             from anytran.processing import process_audio_chunk
-            result = process_audio_chunk(
-                audio_segment=audio,
-                rate=16000,
-                input_lang=None,
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
                 output_lang="fr",
                 magnitude_threshold=0.001,
-                model=None,
-                verbose=False,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
                 scribe_backend="gemma4",
                 slate_backend="gemma4",
                 text_translation_target="fr",
+            )
+            result = process_audio_chunk(
+                audio_segment=audio,
+                rate=16000,
+                config=cfg,
             )
             # One-pass should NOT be called because models differ
             mock_combined.assert_not_called()
@@ -454,22 +446,18 @@ class TestGemma4OnePass(unittest.TestCase):
              patch("anytran.processing.get_gemma4_config", return_value={"model_name": "google/gemma-4-E4B-it"}), \
              patch("anytran.text_translator._gemma4_text_model_name", "google/gemma-4-E4B-it"):
             from anytran.processing import process_audio_chunk
-            result = process_audio_chunk(
-                audio_segment=audio,
-                rate=16000,
-                input_lang=None,
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
                 output_lang="en",
                 magnitude_threshold=0.001,
-                model=None,
-                verbose=False,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
                 scribe_backend="gemma4",
                 slate_backend="gemma4",
                 text_translation_target="en",
+            )
+            result = process_audio_chunk(
+                audio_segment=audio,
+                rate=16000,
+                config=cfg,
             )
             # One-pass should NOT be called because target is English
             mock_combined.assert_not_called()

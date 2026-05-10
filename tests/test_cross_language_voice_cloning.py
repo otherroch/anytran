@@ -87,40 +87,27 @@ def test_cross_language_voice_cloning_translates_ref_text(mock_translate_audio, 
     slate_tts_segments = []
     
     # Process with voice cloning enabled for English → French translation
-    result = processing.process_audio_chunk(
-        audio_segment=audio_segment,
-        rate=16000,
+    from anytran.pipeline_config import PipelineConfig
+    cfg = PipelineConfig(
         input_lang="en",
         output_lang="fr",
         magnitude_threshold=0.001,
         model="small",
-        verbose=True,  # Enable verbose to see debug output
-        mqtt_broker=None,
-        mqtt_port=1883,
-        mqtt_username=None,
-        mqtt_password=None,
-        mqtt_topic="translation",
-        stream_id=None,
+        verbose=True,
         scribe_vad=False,
-        voice_backend="custom",  # Using custom backend
-        voice_model=None,
-        chat_logger=None,
-        rtsp_ip=None,
-        timers=False,
-        timing_stats=None,
+        voice_backend="custom",
         scribe_backend="auto",
         text_translation_target="fr",
         slate_backend="googletrans",
-        voice_lang=None,
-        scribe_text_file=None,
-        slate_text_file=None,
-        scribe_tts_segments=None,
-        slate_tts_segments=slate_tts_segments,
-        langswap_enabled=False,
-        langswap_input_lang=None,
-        langswap_output_lang=None,
-        voice_match=True,  # Voice cloning enabled
+        voice_match=True,
         lang_prefix=False,
+    )
+    result = processing.process_audio_chunk(
+        audio_segment=audio_segment,
+        rate=16000,
+        config=cfg,
+        stream_id=None,
+        slate_tts_segments=slate_tts_segments,
     )
     
     # Should have generated slate audio (French)
@@ -190,40 +177,27 @@ def test_same_language_voice_cloning_with_ref_text(mock_translate_audio, mock_tr
     slate_tts_segments = []
     
     # Process with voice cloning enabled for English → English (same language)
-    result = processing.process_audio_chunk(
-        audio_segment=audio_segment,
-        rate=16000,
+    from anytran.pipeline_config import PipelineConfig
+    cfg = PipelineConfig(
         input_lang="en",
         output_lang="en",
         magnitude_threshold=0.001,
         model="small",
         verbose=True,
-        mqtt_broker=None,
-        mqtt_port=1883,
-        mqtt_username=None,
-        mqtt_password=None,
-        mqtt_topic="translation",
-        stream_id=None,
         scribe_vad=False,
         voice_backend="custom",
-        voice_model=None,
-        chat_logger=None,
-        rtsp_ip=None,
-        timers=False,
-        timing_stats=None,
         scribe_backend="auto",
         text_translation_target="en",
         slate_backend="googletrans",
-        voice_lang=None,
-        scribe_text_file=None,
-        slate_text_file=None,
-        scribe_tts_segments=None,
-        slate_tts_segments=slate_tts_segments,
-        langswap_enabled=False,
-        langswap_input_lang=None,
-        langswap_output_lang=None,
         voice_match=True,
         lang_prefix=False,
+    )
+    result = processing.process_audio_chunk(
+        audio_segment=audio_segment,
+        rate=16000,
+        config=cfg,
+        stream_id=None,
+        slate_tts_segments=slate_tts_segments,
     )
     
     # When target is English, stage2 doesn't run, so slate synthesis happens via langswap path

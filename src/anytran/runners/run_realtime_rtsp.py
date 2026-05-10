@@ -2,6 +2,7 @@ from anytran.audio_io import load_audio_any, output_audio
 from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
 from anytran.mqtt_client import init_mqtt, send_mqtt_text
 from anytran.normalizer import normalize_text
+from anytran.pipeline_config import MQTTConfig, PipelineConfig
 from anytran.processing import build_output_prefix, process_audio_chunk
 from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
 from anytran.stream_rtsp import stream_rtsp_audio
@@ -121,6 +122,34 @@ def run_realtime_rtsp(
     stream_thread.start()
     rate = 16000
     chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
+
+    # Build config objects once before the loop — these settings do not change
+    # between chunks, so creating them once avoids redundant allocations.
+    pipeline_cfg = PipelineConfig(
+        input_lang=input_lang,
+        output_lang=output_lang,
+        magnitude_threshold=magnitude_threshold,
+        model=model,
+        verbose=verbose,
+        scribe_vad=scribe_vad,
+        voice_backend=voice_backend,
+        voice_model=voice_model,
+        timers=timers,
+        scribe_backend=scribe_backend,
+        text_translation_target=text_translation_target,
+        slate_backend=slate_backend,
+        voice_lang=voice_lang,
+        voice_match=voice_match,
+        lang_prefix=lang_prefix,
+    )
+    mqtt_cfg = MQTTConfig(
+        broker=mqtt_broker,
+        port=mqtt_port,
+        username=mqtt_username,
+        password=mqtt_password,
+        topic=mqtt_topic,
+    ) if mqtt_broker else None
+
     try:
         while not stop_flag.is_set():
             try:
@@ -134,33 +163,14 @@ def run_realtime_rtsp(
                     result = process_audio_chunk(
                         audio_segment,
                         rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
-                        scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
-                        voice_model=voice_model,
+                        pipeline_cfg,
+                        mqtt_cfg,
+                        stream_id="rtsp",
                         chat_logger=chat_logger,
                         rtsp_ip=rtsp_ip,
-                        timers=timers,
                         timing_stats=timing_stats,
-                        scribe_backend=scribe_backend,
-                        text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
-                        scribe_text_file=None,
-                        slate_text_file=None,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
                     )
                     # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                     if result:

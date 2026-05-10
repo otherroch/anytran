@@ -1,7 +1,9 @@
 import numpy as np
 import time
+from typing import Optional
 
 from .mqtt_client import send_mqtt_text
+from .pipeline_config import MQTTConfig, PipelineConfig
 from .text_translator import translate_text
 from .timing import add_timing, format_timing
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
@@ -59,39 +61,17 @@ def build_output_prefix(stream_id=None, detected_lang=None):
 
 
 def process_audio_chunk(
-    audio_segment,
-    rate,
-    input_lang,
-    output_lang,
-    magnitude_threshold,
-    model,
-    verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
+    audio_segment: np.ndarray,
+    rate: int,
+    config: PipelineConfig,
+    mqtt: Optional[MQTTConfig] = None,
+    *,
     stream_id=None,
-    scribe_vad=True,
-    voice_backend="gtts",
-    voice_model=None,
     chat_logger=None,
     rtsp_ip=None,
-    timers=False,
     timing_stats=None,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
     scribe_tts_segments=None,
     slate_tts_segments=None,
-    langswap_enabled=False,
-    langswap_input_lang=None,
-    langswap_output_lang=None,
-    voice_match=False,
-    lang_prefix=False,
 ):
     """
     Process an audio chunk through a 3-stage pipeline:
@@ -120,94 +100,43 @@ def process_audio_chunk(
         to process.
     rate : int
         Sample rate in Hz for ``audio_segment``.
-    input_lang : str or None
-        Optional input language code (e.g. ``"en"``, ``"de"``, ``"auto"``). If
-        ``None`` or ``"auto"``, the backend may perform language detection.
-    output_lang : str or None
-        Target language code for translation or transcription. If ``None``, the
-        backend may choose a sensible default (often the detected input language).
-    magnitude_threshold : float
-        Minimum mean absolute magnitude of the audio chunk required to consider it
-        as non‑silence before applying optional VAD.
-    model : str or None
-        Name of the speech/translation model to use. If ``None``, a default
-        (currently ``"medium"``) is used.
-    verbose : bool
-        If ``True``, print diagnostic information about magnitude, VAD, and
-        translation progress.
-    mqtt_broker : str or None
-        Hostname or IP address of the MQTT broker. If ``None``, no MQTT messages are
-        published.
-    mqtt_port : int or None
-        Port number for the MQTT broker. Ignored if ``mqtt_broker`` is ``None``.
-    mqtt_username : str or None
-        Optional username for authenticating with the MQTT broker.
-    mqtt_password : str or None
-        Optional password for authenticating with the MQTT broker.
-    mqtt_topic : str or None
-        Topic to which translated text should be published. If ``None`` or empty,
-        MQTT publishing is skipped even if a broker is configured.
+    config : PipelineConfig
+        Pipeline-wide settings (language, model, backends, timing, etc.).  Create
+        once per run before the processing loop and reuse for every chunk.
+    mqtt : MQTTConfig or None, optional
+        MQTT broker settings.  ``None`` disables MQTT output.
     stream_id : str or int or None, optional
         Identifier for the current audio stream or session. Used only for logging
         and debugging output; may be ``None`` if not needed.
-    scribe_vad : bool, optional
-        If ``True`` and Silero VAD is available, run voice activity detection to
-        further filter out non‑speech segments after the magnitude check.
-    voice_backend : str, optional
-        TTS backend to use, either ``"piper"`` or ``"gtts"`` (default: ``"gtts"``).
-    voice_model : str or None, optional
-        Voice model name for TTS. Used as the Piper voice when ``voice_backend`` is
-        ``"piper"``.
     chat_logger : callable or object or None, optional
         Optional logger used to record recognized/translated text for chat or UI
-        purposes. This is typically a callable taking the formatted text (and
-        possibly additional context), or an object exposing an equivalent logging
-        method. If ``None``, no chat logging is performed.
+        purposes.
     rtsp_ip : str or None, optional
-        Optional IP or URL associated with an RTSP source. Used only for contextual
-        labeling or logging; does not affect translation logic.
-    timers : bool, optional
-        If ``True``, collect timing information for different processing stages
-        (magnitude, VAD, translation, TTS, etc.) and store it in ``timing_stats``.
-    timing_stats : dict or None, optional
-        Optional dictionary used to accumulate timing statistics across multiple
-        calls. When provided and ``timers`` is ``True``, per‑stage timings are added
-        via :func:`add_timing`.
-    scribe_backend : str, optional
-        Preference for the whisper/transcription backend, e.g. ``"auto"`` to let the
-        system choose, or a specific backend name if multiple implementations are
-        available.
-    text_translation_target : str or None, optional
-        Target language code for Stage 2 text-to-text translation. If ``None`` or
-        ``"en"``, Stage 2 is skipped and English transcription is used directly.
-    slate_backend : str, optional
-        Backend for Stage 2 translation: ``"googletrans"``, ``"libretranslate"``,
-        or ``"none"``. Default is ``"googletrans"``.
-    voice_lang : str or None, optional
-        Override for Stage 3 TTS language. If ``None``, uses ``text_translation_target``
-        or falls back to ``output_lang``.
+        Optional IP or URL associated with an RTSP source (logging only).
+    timing_stats : TimingsAggregator or None, optional
+        Optional accumulator for timing statistics across multiple calls.
+    scribe_tts_segments : list or None, optional
+        If provided, append synthesized scribe (English) TTS PCM here.
+    slate_tts_segments : list or None, optional
+        If provided, append synthesized slate (translated) TTS PCM here.
 
     Returns
     -------
-    str or None
-        The formatted output text (including a language prefix as produced by
-        :func:`build_output_prefix`) from the final stage of the pipeline.
-        
-        - If Stage 2 ran: Returns translated text in target language
-        - If Stage 2 skipped: Returns English transcription from Stage 1
-        - Returns ``None`` if the chunk is silence or translation fails
+    dict or None
+        Dictionary with keys ``'output'``, ``'scribe'``, ``'slate'``,
+        ``'final_lang'``, or ``None`` if the chunk is silence or translation fails.
 
     Side Effects
     ------------
     - May perform VAD to skip non-speech audio
     - May synthesize TTS audio and append to ``scribe_tts_segments`` or ``slate_tts_segments``
-    - May publish translated text over MQTT (if ``mqtt_broker`` configured)
+    - May publish translated text over MQTT (if ``mqtt`` configured)
     - May log text via ``chat_logger`` (if provided)
-    - May update ``timing_stats`` with per-stage timing information (if ``timers=True``)
+    - May update ``timing_stats`` with per-stage timing information (if ``config.timers=True``)
     
     Notes
     -----
-    Timing keys when ``timers=True``:
+    Timing keys when ``config.timers=True``:
     - ``magnitude``: Magnitude calculation
     - ``vad``: Voice activity detection (if enabled)
     - ``stage1_transcription``: Whisper audio transcription to English
@@ -216,6 +145,40 @@ def process_audio_chunk(
     - ``stage3_tts_playback``: TTS audio playback (if requested)
     - ``text_out``, ``mqtt``, ``chat_log``, ``tts_append``: Output operations
     """
+    # ---- unpack config for local use so the function body reads naturally ----
+    input_lang = config.input_lang
+    output_lang = config.output_lang
+    magnitude_threshold = config.magnitude_threshold
+    model = config.model
+    verbose = config.verbose
+    scribe_vad = config.scribe_vad
+    voice_backend = config.voice_backend
+    voice_model = config.voice_model
+    timers = config.timers
+    scribe_backend = config.scribe_backend
+    text_translation_target = config.text_translation_target
+    slate_backend = config.slate_backend
+    voice_lang = config.voice_lang
+    langswap_enabled = config.langswap_enabled
+    langswap_input_lang = config.langswap_input_lang
+    langswap_output_lang = config.langswap_output_lang
+    voice_match = config.voice_match
+    lang_prefix = config.lang_prefix
+
+    # ---- unpack MQTT settings (disabled when mqtt is None) ------------------
+    if mqtt is not None:
+        mqtt_broker = mqtt.broker
+        mqtt_port = mqtt.port
+        mqtt_username = mqtt.username
+        mqtt_password = mqtt.password
+        mqtt_topic = mqtt.topic
+    else:
+        mqtt_broker = None
+        mqtt_port = 1883
+        mqtt_username = None
+        mqtt_password = None
+        mqtt_topic = None
+
     timings = [] if timers else None
     t0 = time.perf_counter()
     magnitude = np.abs(audio_segment).mean()
