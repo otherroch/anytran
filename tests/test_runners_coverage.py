@@ -481,13 +481,15 @@ def test_run_multi_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
     output_calls = []
     monkeypatch.setattr(rmr, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
 
+    # Per-stream call counting so each stream processes both chunks before KeyboardInterrupt
     call_counts = {}
 
-    def fake_process_audio_chunk(audio_segment, rate, *args, stream_id=None, **kwargs):
-        key = stream_id or "unknown"
-        call_counts[key] = call_counts.get(key, 0) + 1
-        # Process 2 chunks per stream, then raise KeyboardInterrupt after both are done
-        if call_counts[key] > 2:
+    def fake_process_audio_chunk(audio_segment, rate, pipeline_cfg, stream_ctx, mqtt_cfg):
+        # stream_ctx holds stream_id set by the runner
+        sid = stream_ctx.stream_id if stream_ctx else "unknown"
+        call_counts.setdefault(sid, 0)
+        call_counts[sid] += 1
+        if call_counts[sid] > 2:
             raise KeyboardInterrupt()
         return {"scribe": "hello", "slate": None}
 
