@@ -2,7 +2,7 @@ from anytran.audio_io import output_audio
 from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
 from anytran.mqtt_client import init_mqtt
 from anytran.normalizer import normalize_text
-from anytran.processing import process_audio_chunk
+from anytran.processing import process_audio_chunk, ProcessConfig
 from anytran.stream_rtsp import stream_rtsp_audio
 from anytran.timing import TimingsAggregator
 from anytran.utils import compute_window_params
@@ -119,20 +119,18 @@ def run_multi_rtsp(
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
                         buffer = buffer[chunk - overlap :]
-                        result = process_audio_chunk(
-                            audio_segment,
-                            rate,
-                            input_lang,
-                            output_lang,
-                            magnitude_threshold,
-                            model,
-                            verbose,
-                            mqtt_broker,
-                            mqtt_port,
-                            mqtt_username,
-                            mqtt_password,
-                            stream_mqtt_topic,
-                            stream_id=idx,
+                        # Create configuration for process_audio_chunk
+                        config = ProcessConfig(
+                            input_lang=input_lang,
+                            output_lang=output_lang,
+                            magnitude_threshold=magnitude_threshold,
+                            model=model,
+                            verbose=verbose,
+                            mqtt_broker=mqtt_broker,
+                            mqtt_port=mqtt_port,
+                            mqtt_username=mqtt_username,
+                            mqtt_password=mqtt_password,
+                            mqtt_topic=stream_mqtt_topic,
                             scribe_vad=scribe_vad,
                             voice_backend=voice_backend,
                             voice_model=voice_model,
@@ -150,6 +148,19 @@ def run_multi_rtsp(
                             slate_tts_segments=local_slate_audio_segments,
                             voice_match=voice_match,
                             lang_prefix=lang_prefix,
+                            stream_id=idx,
+                            langswap_enabled=False,
+                            langswap_input_lang=None,
+                            langswap_output_lang=None,
+                            dedup=dedup,
+                            normalize=normalize,
+                        )
+                        
+                        result = process_audio_chunk(
+                            audio_segment,
+                            rate,
+                            config,
+                            stream_id=idx,
                         )
                         # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                         if result:

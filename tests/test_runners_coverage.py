@@ -4,6 +4,12 @@ import time
 import numpy as np
 import pytest
 
+# Import ProcessConfig for new signature
+try:
+    from anytran.processing import ProcessConfig
+except ImportError:
+    ProcessConfig = None
+
 
 @pytest.fixture
 def runner_modules():
@@ -113,8 +119,8 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
         process_calls.append(np.array(audio_segment))
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = kwargs.get('scribe_tts_segments')
+        slate_segments = kwargs.get('slate_tts_segments')
         if scribe_segments is not None:
             scribe_segments.append(np.array([1.0, 1.0], dtype=np.float32))
         if slate_segments is not None:
@@ -179,8 +185,8 @@ def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modu
 
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
         process_calls.append(np.array(audio_segment))
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = kwargs.get('scribe_tts_segments')
+        slate_segments = kwargs.get('slate_tts_segments')
         if scribe_segments is not None:
             scribe_segments.append(np.array([1.0, 1.0], dtype=np.float32))
         if slate_segments is not None:
@@ -265,8 +271,8 @@ def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path
 
     def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
         call_count["n"] += 1
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = kwargs.get('scribe_tts_segments')
+        slate_segments = kwargs.get('slate_tts_segments')
         if scribe_segments is not None:
             scribe_segments.append(np.array([float(call_count["n"])], dtype=np.float32))
         if slate_segments is not None:

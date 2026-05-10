@@ -58,6 +58,68 @@ def build_output_prefix(stream_id=None, detected_lang=None):
     return f"{name}: "
 
 
+class ProcessConfig:
+    """
+    Configuration class for process_audio_chunk to reduce parameter count.
+    Encapsulates parameters that rarely change during processing.
+    """
+    def __init__(
+        self,
+        mqtt_broker=None,
+        mqtt_port=1883,
+        mqtt_username=None,
+        mqtt_password=None,
+        mqtt_topic="translation",
+        voice_backend="gtts",
+        voice_model=None,
+        voice_lang=None,
+        scribe_backend="auto",
+        slate_backend="googletrans",
+        text_translation_target=None,
+        scribe_text_file=None,
+        slate_text_file=None,
+        chat_logger=None,
+        rtsp_ip=None,
+        timers=False,
+        timing_stats=None,
+        scribe_vad=True,
+        voice_match=False,
+        lang_prefix=False,
+        stream_id=None,
+        langswap_enabled=False,
+        langswap_input_lang=None,
+        langswap_output_lang=None,
+        dedup=False,
+        normalize=True,
+    ):
+        self.mqtt_broker = mqtt_broker
+        self.mqtt_port = mqtt_port
+        self.mqtt_username = mqtt_username
+        self.mqtt_password = mqtt_password
+        self.mqtt_topic = mqtt_topic
+        self.voice_backend = voice_backend
+        self.voice_model = voice_model
+        self.voice_lang = voice_lang
+        self.scribe_backend = scribe_backend
+        self.slate_backend = slate_backend
+        self.text_translation_target = text_translation_target
+        self.scribe_text_file = scribe_text_file
+        self.slate_text_file = slate_text_file
+        self.chat_logger = chat_logger
+        self.rtsp_ip = rtsp_ip
+        self.timers = timers
+        self.timing_stats = timing_stats
+        self.scribe_vad = scribe_vad
+        self.voice_match = voice_match
+        self.lang_prefix = lang_prefix
+        self.stream_id = stream_id
+        self.langswap_enabled = langswap_enabled
+        self.langswap_input_lang = langswap_input_lang
+        self.langswap_output_lang = langswap_output_lang
+        self.dedup = dedup
+        self.normalize = normalize
+
+
 def process_audio_chunk(
     audio_segment,
     rate,
@@ -66,11 +128,6 @@ def process_audio_chunk(
     magnitude_threshold,
     model,
     verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
     stream_id=None,
     scribe_vad=True,
     voice_backend="gtts",
@@ -92,6 +149,7 @@ def process_audio_chunk(
     langswap_output_lang=None,
     voice_match=False,
     lang_prefix=False,
+    config=None,
 ):
     """
     Process an audio chunk through a 3-stage pipeline:
@@ -217,6 +275,40 @@ def process_audio_chunk(
     - ``text_out``, ``mqtt``, ``chat_log``, ``tts_append``: Output operations
     """
     timings = [] if timers else None
+    
+    # Use config values if provided
+    if config is not None:
+        mqtt_broker = config.mqtt_broker
+        mqtt_port = config.mqtt_port
+        mqtt_username = config.mqtt_username
+        mqtt_password = config.mqtt_password
+        mqtt_topic = config.mqtt_topic
+        voice_backend = config.voice_backend
+        voice_model = config.voice_model
+        scribe_backend = config.scribe_backend
+        text_translation_target = config.text_translation_target
+        chat_logger = config.chat_logger
+        rtsp_ip = config.rtsp_ip
+        scribe_vad = config.scribe_vad
+        voice_match = config.voice_match
+        lang_prefix = config.lang_prefix
+    else:
+        # Ensure backward compatibility
+        mqtt_broker = mqtt_broker or None
+        mqtt_port = mqtt_port or 1883
+        mqtt_username = mqtt_username or None
+        mqtt_password = mqtt_password or None
+        mqtt_topic = mqtt_topic or "translation"
+        voice_backend = voice_backend or "gtts"
+        voice_model = voice_model or None
+        scribe_backend = scribe_backend or "auto"
+        text_translation_target = text_translation_target or None
+        chat_logger = chat_logger or None
+        rtsp_ip = rtsp_ip or None
+        scribe_vad = scribe_vad or True
+        voice_match = voice_match or False
+        lang_prefix = lang_prefix or False
+
     t0 = time.perf_counter()
     magnitude = np.abs(audio_segment).mean()
     if verbose:
