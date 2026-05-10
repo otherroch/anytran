@@ -8,6 +8,7 @@ import numpy as np
 
 from .config import get_whisper_backend
 from .mqtt_client import init_mqtt
+from .pipeline_config import MQTTConfig, PipelineConfig
 from .processing import process_audio_chunk
 from .timing import TimingsAggregator
 from .utils import normalize_lang_code, compute_window_params
@@ -550,33 +551,40 @@ def run_web_server(
                                 print(f"[web] Using Slate TTS for non-English output")
                             slate_tts_segments = []
                       
-                    translated_text = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        current_input_lang,
-                        current_output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
-                        stream_id="web",
+                    # Build config per-chunk since languages can change dynamically via websocket
+                    web_cfg = PipelineConfig(
+                        input_lang=current_input_lang,
+                        output_lang=current_output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
                         voice_model=voice_model,
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
                         timers=timers,
-                        timing_stats=timing_stats,
                         scribe_backend=scribe_backend,
                         slate_backend=slate_backend,
                         text_translation_target=current_output_lang,
                         langswap_enabled=langswap_enabled,
                         langswap_input_lang=current_input_lang,
                         langswap_output_lang=current_output_lang,
+                    )
+                    web_mqtt = MQTTConfig(
+                        broker=mqtt_broker,
+                        port=mqtt_port,
+                        username=mqtt_username,
+                        password=mqtt_password,
+                        topic=mqtt_topic,
+                    ) if mqtt_broker else None
+                    translated_text = process_audio_chunk(
+                        audio_segment,
+                        rate,
+                        web_cfg,
+                        web_mqtt,
+                        stream_id="web",
+                        timing_stats=timing_stats,
                         slate_tts_segments=slate_tts_segments,
                         scribe_tts_segments=scribe_tts_segments,
                     )

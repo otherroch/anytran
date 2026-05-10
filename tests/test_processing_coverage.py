@@ -137,19 +137,17 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
 
         with patch("anytran.processing.translate_audio") as mock_translate:
             from anytran.processing import process_audio_chunk
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
+                input_lang="en",
+                output_lang="en",
+                magnitude_threshold=0.1,
+                verbose=True,
+            )
             result = process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
-                input_lang="en",
-                output_lang="en",
-                magnitude_threshold=0.1,  # Above zero magnitude
-                model=None,
-                verbose=True,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
+                config=cfg,
             )
             # translate_audio should not be called for silent audio
             mock_translate.assert_not_called()
@@ -163,20 +161,15 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
         with patch("anytran.processing.translate_audio") as mock_translate:
             mock_translate.return_value = ("hello world", "en", [])
             from anytran.processing import process_audio_chunk
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
+                magnitude_threshold=0.1,
+                scribe_vad=False,
+            )
             process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
-                input_lang=None,
-                output_lang=None,
-                magnitude_threshold=0.1,
-                model=None,
-                verbose=False,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
-                scribe_vad=False,
+                config=cfg,
             )
             mock_translate.assert_called_once()
 
@@ -188,20 +181,15 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
 
         with patch("anytran.processing.translate_audio") as mock_translate:
             from anytran.processing import process_audio_chunk
+            from anytran.pipeline_config import PipelineConfig
+            cfg = PipelineConfig(
+                magnitude_threshold=0.5,
+                timers=True,
+            )
             process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
-                input_lang=None,
-                output_lang=None,
-                magnitude_threshold=0.5,
-                model=None,
-                verbose=False,
-                mqtt_broker=None,
-                mqtt_port=1883,
-                mqtt_username=None,
-                mqtt_password=None,
-                mqtt_topic=None,
-                timers=True,
+                config=cfg,
             )
             # Should complete without error
 

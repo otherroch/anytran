@@ -135,6 +135,7 @@ for _key in list(sys.modules.keys()):
 
 import numpy as np
 from anytran.processing import process_audio_chunk, build_output_prefix
+from anytran.pipeline_config import PipelineConfig, MQTTConfig
 from anytran.runners.run_file_input import run_file_input
 from anytran import text_translator
 
@@ -155,25 +156,23 @@ class TestPipelineStages(unittest.TestCase):
         """Stage 1 only: transcription without translation produces English output."""
         mock_translate_audio.return_value = (self._audio_chunk(), "hello world", "en")
 
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
+        cfg = PipelineConfig(
             input_lang="en",
             output_lang="en",
             magnitude_threshold=0.001,
             model="tiny",
             verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
             scribe_vad=False,
             timers=False,
             text_translation_target=None,
             slate_backend="googletrans",
             voice_lang=None,
             lang_prefix=True,
+        )
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            cfg,
         )
 
         self.assertTrue(output["output"].startswith("English: "))
@@ -189,25 +188,23 @@ class TestPipelineStages(unittest.TestCase):
         mock_translate_audio.return_value = (self._audio_chunk(), "hello", "en")
         mock_translate_text.return_value = "bonjour"
 
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
+        cfg = PipelineConfig(
             input_lang="en",
             output_lang="fr",
             magnitude_threshold=0.001,
             model="tiny",
             verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
             scribe_vad=False,
             timers=False,
             text_translation_target="fr",
             slate_backend="googletrans",
             voice_lang=None,
             lang_prefix=True,
+        )
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            cfg,
         )
 
         self.assertTrue(output["output"].startswith("French: "))
@@ -224,25 +221,23 @@ class TestPipelineStages(unittest.TestCase):
         mock_tts.return_value = np.zeros(16000, dtype=np.int16)
 
         segments = []
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
+        cfg = PipelineConfig(
             input_lang="en",
             output_lang="fr",
             magnitude_threshold=0.001,
             model="tiny",
             verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
             scribe_vad=False,
             timers=False,
             text_translation_target="fr",
             slate_backend="googletrans",
             voice_lang=None,
             lang_prefix=True,
+        )
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            cfg,
             slate_tts_segments=segments,
         )
 
@@ -263,15 +258,20 @@ class TestProcessAudioChunkOutput(unittest.TestCase):
         """process_audio_chunk returns a dict with output/scribe/slate/final_lang keys."""
         mock_translate_audio.return_value = (self._audio_chunk(), "hello world", "en")
 
+        cfg = PipelineConfig(
+            input_lang="en",
+            output_lang="en",
+            magnitude_threshold=0.001,
+            model="tiny",
+            verbose=False,
+            scribe_vad=False,
+            timers=False,
+            text_translation_target=None,
+            slate_backend="googletrans",
+        )
         result = process_audio_chunk(
             self._audio_chunk(), 16000,
-            input_lang="en", output_lang="en",
-            magnitude_threshold=0.001, model="tiny", verbose=False,
-            mqtt_broker=None, mqtt_port=None, mqtt_username=None,
-            mqtt_password=None, mqtt_topic=None,
-            scribe_vad=False, timers=False,
-            text_translation_target=None, slate_backend="googletrans",
-            voice_lang=None,
+            cfg,
         )
 
         self.assertIsInstance(result, dict)
@@ -284,16 +284,20 @@ class TestProcessAudioChunkOutput(unittest.TestCase):
         """process_audio_chunk returns None when audio is below the magnitude threshold."""
         silent_audio = np.zeros(16000, dtype=np.float32)
 
+        cfg = PipelineConfig(
+            input_lang="en",
+            output_lang="en",
+            magnitude_threshold=0.5,
+            model="tiny",
+            verbose=False,
+            scribe_vad=False,
+            timers=False,
+            text_translation_target=None,
+            slate_backend="googletrans",
+        )
         result = process_audio_chunk(
             silent_audio, 16000,
-            input_lang="en", output_lang="en",
-            magnitude_threshold=0.5,
-            model="tiny", verbose=False,
-            mqtt_broker=None, mqtt_port=None, mqtt_username=None,
-            mqtt_password=None, mqtt_topic=None,
-            scribe_vad=False, timers=False,
-            text_translation_target=None, slate_backend="googletrans",
-            voice_lang=None,
+            cfg,
         )
 
         self.assertIsNone(result)
@@ -430,24 +434,22 @@ class TestLangPrefixOption(unittest.TestCase):
         """Without lang_prefix the output is the raw transcription text."""
         mock_translate_audio.return_value = (self._audio_chunk(), "hello world", "en")
 
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
+        cfg = PipelineConfig(
             input_lang="en",
             output_lang="en",
             magnitude_threshold=0.001,
             model="tiny",
             verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
             scribe_vad=False,
             timers=False,
             text_translation_target=None,
             slate_backend="googletrans",
-            voice_lang=None,
+            lang_prefix=False,
+        )
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            cfg,
         )
 
         self.assertEqual(output["output"], "hello world")
@@ -459,25 +461,22 @@ class TestLangPrefixOption(unittest.TestCase):
         """With lang_prefix=True the output is prefixed with the language name."""
         mock_translate_audio.return_value = (self._audio_chunk(), "hello world", "en")
 
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
+        cfg = PipelineConfig(
             input_lang="en",
             output_lang="en",
             magnitude_threshold=0.001,
             model="tiny",
             verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
             scribe_vad=False,
             timers=False,
             text_translation_target=None,
             slate_backend="googletrans",
-            voice_lang=None,
             lang_prefix=True,
+        )
+        output = process_audio_chunk(
+            self._audio_chunk(),
+            16000,
+            cfg,
         )
 
         self.assertTrue(output["output"].startswith("English: "))
