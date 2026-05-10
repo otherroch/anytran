@@ -481,13 +481,15 @@ def test_run_multi_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
     output_calls = []
     monkeypatch.setattr(rmr, "output_audio", lambda data, path, play=False: output_calls.append((path, np.array(data))))
 
-    # Make worker threads daemon so they don't block test exit
-    original_thread_init = rmr.threading.Thread.__init__
-    def daemon_thread_init(self, *args, daemon=True, **kwargs):
-        original_thread_init(self, *args, daemon=True, **kwargs)
-    monkeypatch.setattr(rmr.threading.Thread, "__init__", daemon_thread_init)
+    # Per-stream call counting so each stream processes chunks before KeyboardInterrupt
+    # The worker's except KeyboardInterrupt block catches this and exits cleanly
+    call_counts = {"s1": 0, "s2": 0}
 
     def fake_process_audio_chunk(audio_segment, rate, pipeline_cfg, stream_ctx, mqtt_cfg):
+        sid = "s1" if stream_ctx and stream_ctx.stream_id == 1 else "s2"
+        call_counts[sid] += 1
+        if call_counts[sid] >= 2:
+            raise KeyboardInterrupt()
         return {"scribe": "hello", "slate": None}
 
     monkeypatch.setattr(rmr, "process_audio_chunk", fake_process_audio_chunk)
@@ -495,6 +497,9 @@ def test_run_multi_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
     def fake_stream_rtsp_audio(rtsp_url, audio_queue):
         audio_queue.put(np.array([0.1, 0.2], dtype=np.float32))
         audio_queue.put(np.array([0.3, 0.4], dtype=np.float32))
+        # Keep running so worker can drain; the KeyboardInterrupt will stop it
+        while not rmr.threading.current_thread().daemon:
+            time.sleep(0.1)
 
     monkeypatch.setattr(rmr, "stream_rtsp_audio", fake_stream_rtsp_audio)
 
