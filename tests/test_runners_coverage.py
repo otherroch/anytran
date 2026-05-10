@@ -111,10 +111,10 @@ def test_run_file_input_audio_chunk_processing(monkeypatch, tmp_path, runner_mod
 
     slate_outputs = 0
 
-    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+    def fake_process_audio_chunk(audio_segment, rate, pipeline_cfg, stream_ctx, mqtt_cfg):
         process_calls.append(np.array(audio_segment))
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = stream_ctx.scribe_tts_segments if stream_ctx is not None else None
+        slate_segments = stream_ctx.slate_tts_segments if stream_ctx is not None else None
         if scribe_segments is not None:
             scribe_segments.append(np.array([1.0, 1.0], dtype=np.float32))
         if slate_segments is not None:
@@ -177,10 +177,10 @@ def test_run_realtime_output_processes_chunks(monkeypatch, tmp_path, runner_modu
 
     process_calls = []
 
-    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+    def fake_process_audio_chunk(audio_segment, rate, pipeline_cfg, stream_ctx, mqtt_cfg):
         process_calls.append(np.array(audio_segment))
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = stream_ctx.scribe_tts_segments if stream_ctx is not None else None
+        slate_segments = stream_ctx.slate_tts_segments if stream_ctx is not None else None
         if scribe_segments is not None:
             scribe_segments.append(np.array([1.0, 1.0], dtype=np.float32))
         if slate_segments is not None:
@@ -263,10 +263,10 @@ def test_run_realtime_youtube_processes_and_flushes_buffer(monkeypatch, tmp_path
 
     call_count = {"n": 0}
 
-    def fake_process_audio_chunk(audio_segment, rate, *args, **kwargs):
+    def fake_process_audio_chunk(audio_segment, rate, pipeline_cfg, stream_ctx, mqtt_cfg):
         call_count["n"] += 1
-        scribe_segments = kwargs["scribe_tts_segments"]
-        slate_segments = kwargs["slate_tts_segments"]
+        scribe_segments = stream_ctx.scribe_tts_segments if stream_ctx is not None else None
+        slate_segments = stream_ctx.slate_tts_segments if stream_ctx is not None else None
         if scribe_segments is not None:
             scribe_segments.append(np.array([float(call_count["n"])], dtype=np.float32))
         if slate_segments is not None:
@@ -486,7 +486,8 @@ def test_run_multi_rtsp_capture_voice(monkeypatch, tmp_path, runner_modules):
     def fake_process_audio_chunk(audio_segment, rate, *args, stream_id=None, **kwargs):
         key = stream_id or "unknown"
         call_counts[key] = call_counts.get(key, 0) + 1
-        if call_counts[key] >= 2:
+        # Process 2 chunks per stream, then raise KeyboardInterrupt after both are done
+        if call_counts[key] > 2:
             raise KeyboardInterrupt()
         return {"scribe": "hello", "slate": None}
 
