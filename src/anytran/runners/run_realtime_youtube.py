@@ -12,70 +12,42 @@ import time
 from queue import Queue, Empty
 
 from anytran.audio_io import output_audio
+from .config import RunnerConfig
 
 DRAIN_COMPLETE_MSG = "Stop requested; audio queue drain complete."
 QUEUE_TIMEOUT_DRAIN = 0
 QUEUE_TIMEOUT_NORMAL = 1
 
-def run_realtime_youtube(
-    youtube_url,
-    youtube_api_key,
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    output_audio_path=None,
-    slate_audio_path=None,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    youtube_js_runtime=None,
-    youtube_remote_components=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    dedup=False,
-    lang_prefix=False,
-    normalize=True,
-    capture_voice_path=None,
-):
+def run_realtime_youtube(config):
+    # Create a RunnerConfig instance from parameters if needed
+    if not isinstance(config, RunnerConfig):
+        # If config is not a RunnerConfig, create one from the parameters
+        config = RunnerConfig(**config)
+    
     print("Starting YouTube audio translation...")
-    print(f"Input language: {input_lang}, Output language: {output_lang}")
-    if output_audio_path:
-        print(f"Output audio will be saved to: {output_audio_path}")
+    print(f"Input language: {config.input_lang}, Output language: {config.output_lang}")
+    if config.output_audio_path:
+        print(f"Output audio will be saved to: {config.output_audio_path}")
     # output_text_file removed
-    if scribe_text_file:
-        print(f"Stage 1 (English) text will be saved to: {scribe_text_file}")
-    if slate_text_file:
-        print(f"Stage 2 (translated) text will be saved to: {slate_text_file}")
-    if capture_voice_path:
-        print(f"Original input voice will be saved to: {capture_voice_path}")
-    if mqtt_broker:
-        print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}, topic: {mqtt_topic}")
+    if config.scribe_text_file:
+        print(f"Stage 1 (English) text will be saved to: {config.scribe_text_file}")
+    if config.slate_text_file:
+        print(f"Stage 2 (translated) text will be saved to: {config.slate_text_file}")
+    if config.capture_voice_path:
+        print(f"Original input voice will be saved to: {config.capture_voice_path}")
+    if config.mqtt_broker:
+        print(f"MQTT output enabled: {config.mqtt_broker}:{config.mqtt_port}, topic: {config.mqtt_topic}")
     print("Press Ctrl+C to stop.")
+    
+    youtube_url = config.youtube_url
+    youtube_api_key = config.youtube_api_key
 
     video_id = extract_youtube_video_id(youtube_url)
     if not video_id:
         print("Error: Unable to parse YouTube video ID from URL.")
         return
 
-    validation = validate_youtube_video(youtube_api_key, video_id, verbose=verbose)
+    validation = validate_youtube_video(youtube_api_key, video_id, verbose=config.verbose)
     if not validation:
         print("Error: YouTube API validation failed. Check API key and video ID.")
         return
@@ -85,24 +57,24 @@ def run_realtime_youtube(
     if content_details:
         expected_duration = parse_iso8601_duration(content_details.get("duration"))
 
-    js_runtime = youtube_js_runtime
+    js_runtime = config.youtube_js_runtime
     if not js_runtime:
         if shutil.which("node"):
             js_runtime = "node"
         elif shutil.which("deno"):
             js_runtime = "deno"
-    if verbose and js_runtime:
+    if config.verbose and js_runtime:
         print(f"Using yt-dlp JS runtime: {js_runtime}")
 
-    if verbose and youtube_remote_components:
-        print(f"Using yt-dlp remote components: {youtube_remote_components}")
+    if config.verbose and config.youtube_remote_components:
+        print(f"Using yt-dlp remote components: {config.youtube_remote_components}")
 
     def resolve_audio_url():
         return get_youtube_audio_stream_url(
             youtube_url,
-            verbose=verbose,
+            verbose=config.verbose,
             js_runtime=js_runtime,
-            remote_components=youtube_remote_components,
+            remote_components=config.youtube_remote_components,
         )
 
     stop_flag = threading.Event()
@@ -113,27 +85,27 @@ def run_realtime_youtube(
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    if mqtt_broker:
-        init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
+    if config.mqtt_broker:
+        init_mqtt(config.mqtt_broker, config.mqtt_port, config.mqtt_username, config.mqtt_password, config.mqtt_topic)
     
-    if timers_all:
-        timers = True  # timers_all implies timers
+    if config.timers_all:
+        config.timers = True  # timers_all implies timers
         
-    timing_stats = TimingsAggregator("youtube") if timers else None
+    timing_stats = TimingsAggregator("youtube") if config.timers else None
 
     audio_queue = Queue(maxsize=5)
     buffer = np.array([], dtype=np.float32)
     # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
-    scribe_audio_segments = [] if output_audio_path else None
-    slate_audio_segments = [] if slate_audio_path else None
-    capture_voice_segments = [] if capture_voice_path else None
+    scribe_file = open(config.scribe_text_file, mode="w", encoding="utf-8") if config.scribe_text_file else None
+    slate_file = open(config.slate_text_file, mode="w", encoding="utf-8") if config.slate_text_file else None
+    scribe_audio_segments = [] if config.output_audio_path else None
+    slate_audio_segments = [] if config.slate_audio_path else None
+    capture_voice_segments = [] if config.capture_voice_path else None
 
     # Deduplication tracking: keep a sliding window of recent outputs to catch duplicates
     # across overlapping chunks.
-    recent_slate_outputs = [] if dedup else None
-    recent_scribe_outputs = [] if dedup else None
+    recent_slate_outputs = [] if config.dedup else None
+    recent_scribe_outputs = [] if config.dedup else None
     dedup_window_size = 10  # Check last 10 outputs
     # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
     last_written_scribe = None
@@ -148,13 +120,13 @@ def run_realtime_youtube(
 
     stream_thread = threading.Thread(
         target=stream_youtube_audio,
-        args=(resolve_audio_url, audio_queue, 16000, stop_flag, expected_duration, 5, verbose, False),
+        args=(resolve_audio_url, audio_queue, 16000, stop_flag, expected_duration, 5, config.verbose, False),
         daemon=True,
     )
     stream_thread.start()
 
     rate = 16000
-    chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
+    chunk, overlap = compute_window_params(config.window_seconds, config.overlap_seconds, rate)
     idle_seconds = 0
     max_idle_seconds = 60
     stream_ended = False
@@ -175,32 +147,32 @@ def run_realtime_youtube(
                     result = process_audio_chunk(
                         audio_segment,
                         rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
+                        config.input_lang,
+                        config.output_lang,
+                        config.magnitude_threshold,
+                        config.model,
+                        config.verbose,
+                        config.mqtt_broker,
+                        config.mqtt_port,
+                        config.mqtt_username,
+                        config.mqtt_password,
+                        config.mqtt_topic,
                         stream_id="youtube",
-                        scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
-                        voice_model=voice_model,
-                        timers=timers,
+                        scribe_vad=config.scribe_vad,
+                        voice_backend=config.voice_backend,
+                        voice_model=config.voice_model,
+                        timers=config.timers,
                         timing_stats=timing_stats,
-                        scribe_backend=scribe_backend,
-                        text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
+                        scribe_backend=config.scribe_backend,
+                        text_translation_target=config.text_translation_target,
+                        slate_backend=config.slate_backend,
+                        voice_lang=config.voice_lang,
                         scribe_text_file=None,
                         slate_text_file=None,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
+                        voice_match=config.voice_match,
+                        lang_prefix=config.lang_prefix,
                     )
                     
                     # Deduplication: Write outputs only if not in recent window
@@ -208,9 +180,9 @@ def run_realtime_youtube(
                         scribe_output = result.get('scribe')
                         slate_output = result.get('slate')
 
-                        if dedup:
+                        if config.dedup:
                             if scribe_output:
-                                scribe_key = normalize_text(scribe_output) if normalize else scribe_output
+                                scribe_key = normalize_text(scribe_output) if config.normalize else scribe_output
                                 if scribe_key not in recent_scribe_outputs:
                                     if scribe_file:
                                         scribe_file.write(f"{scribe_key}\n")
@@ -221,7 +193,7 @@ def run_realtime_youtube(
                                     last_written_scribe = scribe_key
 
                             if slate_output:
-                                slate_key = normalize_text(slate_output) if normalize else slate_output
+                                slate_key = normalize_text(slate_output) if config.normalize else slate_output
                                 if slate_key not in recent_slate_outputs:
                                     if slate_file:
                                         slate_file.write(f"{slate_key}\n")
@@ -232,12 +204,12 @@ def run_realtime_youtube(
                                     last_written_slate = slate_key
                         else:
                             if scribe_output and scribe_file:
-                                if normalize:
+                                if config.normalize:
                                     scribe_output = normalize_text(scribe_output)
                                 scribe_file.write(f"{scribe_output}\n")
                                 scribe_file.flush()
                             if slate_output and slate_file:
-                                if normalize:
+                                if config.normalize:
                                     slate_output = normalize_text(slate_output)
                                 slate_file.write(f"{slate_output}\n")
                                 slate_file.flush()
@@ -248,7 +220,7 @@ def run_realtime_youtube(
                 idle_seconds += 1
                 if not stream_thread.is_alive():
                     stream_ended = True
-                    if verbose:
+                    if config.verbose:
                         print("YouTube stream ended; draining buffer.")
                 if stream_ended and idle_seconds >= 2:
                     break
@@ -261,55 +233,55 @@ def run_realtime_youtube(
         stop_flag.set()
     finally:
         if len(buffer) > 0:
-            if verbose:
-                print("Processing final audio buffer...")
+            if config.verbose:
+                print("Processing final audio buffer. ..")
             try:
                 result = process_audio_chunk(
                     buffer,
                     rate,
-                    input_lang,
-                    output_lang,
-                    magnitude_threshold,
-                    model,
-                    verbose,
-                    mqtt_broker,
-                    mqtt_port,
-                    mqtt_username,
-                    mqtt_password,
-                    mqtt_topic,
+                    config.input_lang,
+                    config.output_lang,
+                    config.magnitude_threshold,
+                    config.model,
+                    config.verbose,
+                    config.mqtt_broker,
+                    config.mqtt_port,
+                    config.mqtt_username,
+                    config.mqtt_password,
+                    config.mqtt_topic,
                     stream_id="youtube",
-                    scribe_vad=scribe_vad,
-                    voice_backend=voice_backend,
-                    voice_model=voice_model,
-                    timers=timers,
+                    scribe_vad=config.scribe_vad,
+                    voice_backend=config.voice_backend,
+                    voice_model=config.voice_model,
+                    timers=config.timers,
                     timing_stats=timing_stats,
-                    scribe_backend=scribe_backend,
-                    text_translation_target=text_translation_target,
-                    slate_backend=slate_backend,
-                    voice_lang=voice_lang,
+                    scribe_backend=config.scribe_backend,
+                    text_translation_target=config.text_translation_target,
+                    slate_backend=config.slate_backend,
+                    voice_lang=config.voice_lang,
                     scribe_text_file=None,
                     slate_text_file=None,
                     scribe_tts_segments=scribe_audio_segments,
                     slate_tts_segments=slate_audio_segments,
-                    voice_match=voice_match,
-                    lang_prefix=lang_prefix,
+                    voice_match=config.voice_match,
+                    lang_prefix=config.lang_prefix,
                 )
                 
                 # Deduplication: Write outputs only if different from last ones
                 if result:
                     scribe_output = result.get('scribe')
                     slate_output = result.get('slate')
-                    if dedup:
+                    if config.dedup:
                         if scribe_output:
-                            scribe_key = normalize_text(scribe_output) if normalize else scribe_output
+                            scribe_key = normalize_text(scribe_output) if config.normalize else scribe_output
                             if scribe_key != last_written_scribe:
                                 if scribe_file:
                                     scribe_file.write(f"{scribe_key}\n")
                                     scribe_file.flush()
                                 last_written_scribe = scribe_key
-                     
+      	       
                         if slate_output:
-                            slate_key = normalize_text(slate_output) if normalize else slate_output
+                            slate_key = normalize_text(slate_output) if config.normalize else slate_output
                             if slate_key != last_written_slate:
                                 if slate_file:
                                     slate_file.write(f"{slate_key}\n")
@@ -317,50 +289,50 @@ def run_realtime_youtube(
                                 last_written_slate = slate_key
                     else:
                         if scribe_output and scribe_file:
-                            if normalize:
+                            if config.normalize:
                                 scribe_output = normalize_text(scribe_output)
                             scribe_file.write(f"{scribe_output}\n")
                             scribe_file.flush()
                         if slate_output and slate_file:
-                            if normalize:
+                            if config.normalize:
                                 slate_output = normalize_text(slate_output)
                             slate_file.write(f"{slate_output}\n")
                             slate_file.flush()
             except Exception as exc:
-                if verbose:
+                if config.verbose:
                     print(f"Final buffer processing failed: {exc}")
         if scribe_file:
             scribe_file.close()
-            print(f"Stage 1 (English) text file saved: {scribe_text_file}", flush=True)
+            print(f"Stage 1 (English) text file saved: {config.scribe_text_file}", flush=True)
         if slate_file:
             slate_file.close()
-            print(f"Stage 2 (translated) text file saved: {slate_text_file}", flush=True)
+            print(f"Stage 2 (translated) text file saved: {config.slate_text_file}", flush=True)
         if scribe_audio_segments is not None:
             if len(scribe_audio_segments) > 0:
                 all_audio = np.concatenate(scribe_audio_segments)
                 try:
-                    output_audio(all_audio, output_audio_path, play=False)
-                    print(f"Scribe audio file saved: {output_audio_path}", flush=True)
+                    output_audio(all_audio, config.output_audio_path, play=False)
+                    print(f"Scribe audio file saved: {config.output_audio_path}", flush=True)
                 except Exception as exc:
                     print(f"Error saving scribe audio file: {exc}", flush=True)
         if slate_audio_segments is not None:
             if len(slate_audio_segments) > 0:
                 all_audio = np.concatenate(slate_audio_segments)
                 try:
-                    output_audio(all_audio, slate_audio_path, play=False)
-                    print(f"Slate audio file saved: {slate_audio_path}", flush=True)
+                    output_audio(all_audio, config.slate_audio_path, play=False)
+                    print(f"Slate audio file saved: {config.slate_audio_path}", flush=True)
                 except Exception as exc:
                     print(f"Error saving slate audio file: {exc}", flush=True)
         if capture_voice_segments is not None:
             if len(capture_voice_segments) > 0:
                 all_audio = np.concatenate(capture_voice_segments)
                 try:
-                    output_audio(all_audio, capture_voice_path, play=False)
-                    print(f"Captured input voice saved: {capture_voice_path}", flush=True)
+                    output_audio(all_audio, config.capture_voice_path, play=False)
+                    print(f"Captured input voice saved: {config.capture_voice_path}", flush=True)
                 except Exception as exc:
                     print(f"Error saving captured input voice: {exc}", flush=True)
         if timing_stats is not None:
-            if timers_all:
+            if config.timers_all:
                 summary = timing_stats.format_summary()
                 if summary:
                     print(f"\nTiming summary (youtube):\n{summary}")
@@ -370,7 +342,7 @@ def run_realtime_youtube(
                 overhead = timing_stats.format_translate_overhead('chunk')
                 if overhead:
                     print(f"\nTiming translate overhead (youtube):\n{overhead}")
-            elif timers:
+            elif config.timers:
                 stage_summary = timing_stats.format_stage_summary()
                 if stage_summary:
                     print(f"\nTiming summary by stage (youtube):\n{stage_summary}")

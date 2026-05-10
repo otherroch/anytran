@@ -13,43 +13,86 @@ import time
 import os
 import librosa
  
-def run_file_input(
-    input_path,
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    output_audio_path=None,
-    slate_audio_path=None,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    keep_temp=False,
-    dedup=False,
-    lang_prefix=False,
-    batch=0,
-    normalize=True,
-    slate_no_opt=False,
-):
+def run_file_input(input_path=None, **kwargs):
+    # Handle backward compatibility: if input_path is None, assume kwargs contains all parameters
+    if input_path is None and 'config' in kwargs:
+        # If a config is passed in kwargs, use it
+        config = kwargs['config']
+        # If config is a dict, convert to RunnerConfig
+        if isinstance(config, dict):
+            from .config import RunnerConfig
+            config = RunnerConfig(**config)
+        # Extract parameters from config object
+        input_path = config.input_path
+        input_lang = config.input_lang
+        output_lang = config.output_lang
+        magnitude_threshold = config.magnitude_threshold
+        output_audio_path = config.output_audio_path
+        slate_audio_path = config.slate_audio_path
+        model = config.model
+        verbose = config.verbose
+        mqtt_broker = config.mqtt_broker
+        mqtt_port = config.mqtt_port
+        mqtt_username = config.mqtt_username
+        mqtt_password = config.mqtt_password
+        mqtt_topic = config.mqtt_topic
+        scribe_vad = config.scribe_vad
+        voice_backend = config.voice_backend
+        voice_model = config.voice_model
+        window_seconds = config.window_seconds
+        overlap_seconds = config.overlap_seconds
+        timers = config.timers
+        timers_all = config.timers_all
+        scribe_backend = config.scribe_backend
+        text_translation_target = config.text_translation_target
+        slate_backend = config.slate_backend
+        voice_lang = config.voice_lang
+        scribe_text_file = config.scribe_text_file
+        slate_text_file = config.slate_text_file
+        voice_match = config.voice_match
+        keep_temp = config.keep_temp
+        dedup = config.dedup
+        lang_prefix = config.lang_prefix
+        batch = config.batch
+        normalize = config.normalize
+        slate_no_opt = config.slate_no_opt
+    elif input_path is not None:
+        # Extract parameters from kwargs for backward compatibility
+        input_lang = kwargs.get('input_lang')
+        output_lang = kwargs.get('output_lang')
+        magnitude_threshold = kwargs.get('magnitude_threshold', 0.02)
+        output_audio_path = kwargs.get('output_audio_path')
+        slate_audio_path = kwargs.get('slate_audio_path')
+        model = kwargs.get('model')
+        verbose = kwargs.get('verbose', False)
+        mqtt_broker = kwargs.get('mqtt_broker')
+        mqtt_port = kwargs.get('mqtt_port', 1883)
+        mqtt_username = kwargs.get('mqtt_username')
+        mqtt_password = kwargs.get('mqtt_password')
+        mqtt_topic = kwargs.get('mqtt_topic', 'translation')
+        scribe_vad = kwargs.get('scribe_vad', False)
+        voice_backend = kwargs.get('voice_backend', 'gtts')
+        voice_model = kwargs.get('voice_model')
+        window_seconds = kwargs.get('window_seconds', 5.0)
+        overlap_seconds = kwargs.get('overlap_seconds', 0.0)
+        timers = kwargs.get('timers', False)
+        timers_all = kwargs.get('timers_all', False)
+        scribe_backend = kwargs.get('scribe_backend', 'auto')
+        text_translation_target = kwargs.get('text_translation_target')
+        slate_backend = kwargs.get('slate_backend', 'googletrans')
+        voice_lang = kwargs.get('voice_lang')
+        scribe_text_file = kwargs.get('scribe_text_file')
+        slate_text_file = kwargs.get('slate_text_file')
+        voice_match = kwargs.get('voice_match', False)
+        keep_temp = kwargs.get('keep_temp', False)
+        dedup = kwargs.get('dedup', False)
+        lang_prefix = kwargs.get('lang_prefix', False)
+        batch = kwargs.get('batch', 0)
+        normalize = kwargs.get('normalize', True)
+        slate_no_opt = kwargs.get('slate_no_opt', False)
+    else:
+        # Handle case where no input_path is provided and no config is passed
+        raise ValueError("Either input_path must be provided or config must be passed")
     print("Starting file input processing...")
     if keep_temp:
         import builtins

@@ -143,7 +143,37 @@ def _run_output_pipeline(args, config):
     # Create RunnerConfig object from the dictionary config
     runner_config = RunnerConfig(**config)
     run_realtime_output(
-        runner_config,
+        runner_config.input_lang,
+        runner_config.output_lang,
+        runner_config.magnitude_threshold,
+        output_audio_path=runner_config.scribe_voice if isinstance(runner_config.scribe_voice, str) else None,
+        slate_audio_path=runner_config.slate_voice if isinstance(runner_config.slate_voice, str) else None,
+        model=runner_config.model,
+        verbose=runner_config.verbose,
+        mqtt_broker=runner_config.mqtt_broker,
+        mqtt_port=runner_config.mqtt_port,
+        mqtt_username=runner_config.mqtt_username,
+        mqtt_password=runner_config.mqtt_password,
+        mqtt_topic=runner_config.mqtt_topic,
+        scribe_vad=runner_config.scribe_vad,
+        voice_backend=runner_config.voice_backend,
+        voice_model=runner_config.voice_model,
+        output_device=args.output_device,
+        window_seconds=runner_config.window_seconds,
+        overlap_seconds=runner_config.overlap_seconds,
+        timers=runner_config.timers,
+        timers_all=runner_config.timers_all,
+        scribe_backend=runner_config.scribe_backend,
+        text_translation_target=runner_config.text_translation_target,
+        slate_backend=runner_config.slate_backend,
+        voice_lang=runner_config.voice_lang,
+        scribe_text_file=runner_config.scribe_text,
+        slate_text_file=runner_config.slate_text,
+        voice_match=runner_config.voice_match,
+        dedup=runner_config.dedup,
+        lang_prefix=runner_config.lang_prefix,
+        normalize=runner_config.normalize,
+        capture_voice_path=runner_config.capture_voice,
     )
     return 0
 
@@ -347,7 +377,7 @@ def _run_file_pipeline(args, config):
     # Create RunnerConfig object from the dictionary config
     runner_config = RunnerConfig(**config)
     run_file_input(
-        config=runner_config,
+        runner_config,
         temp_input_path,
     )
 
