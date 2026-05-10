@@ -14,7 +14,7 @@ Groups
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -123,12 +123,6 @@ class PipelineConfig:
     keep_temp : bool
         Keep temporary files (default ``False``).
 
-    # Chat logging (RTSP)
-    chat_logger : object or None
-        ChatLogger instance for RTSP chat logging.
-    rtsp_ip : str or None
-        IP address extracted from RTSP URL.
-
     # LangSwap (bidirectional translation)
     langswap_enabled : bool
     langswap_input_lang : str or None
@@ -173,10 +167,6 @@ class PipelineConfig:
 
     # File input specific
     keep_temp: bool = False
-
-    # Chat logging (RTSP)
-    chat_logger: Optional[object] = None
-    rtsp_ip: Optional[str] = None
 
     # LangSwap
     langswap_enabled: bool = False

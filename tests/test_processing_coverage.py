@@ -137,6 +137,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
 
         with patch("anytran.processing.translate_audio") as mock_translate:
             from anytran.processing import process_audio_chunk, PipelineConfig, MQTTConfig
+            from anytran.pipeline_config import StreamContext
             result = process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -148,6 +149,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
                     verbose=True,
                 ),
                 mqtt=MQTTConfig(),
+                ctx=StreamContext(),
             )
             # translate_audio should not be called for silent audio
             mock_translate.assert_not_called()
@@ -161,6 +163,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
         with patch("anytran.processing.translate_audio") as mock_translate:
             mock_translate.return_value = ("hello world", "en", [])
             from anytran.processing import process_audio_chunk, PipelineConfig, MQTTConfig
+            from anytran.pipeline_config import StreamContext
             process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -169,6 +172,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
                     scribe_vad=False,
                 ),
                 mqtt=MQTTConfig(),
+                ctx=StreamContext(),
             )
             mock_translate.assert_called_once()
 
@@ -180,6 +184,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
 
         with patch("anytran.processing.translate_audio") as mock_translate:
             from anytran.processing import process_audio_chunk, PipelineConfig, MQTTConfig
+            from anytran.pipeline_config import StreamContext
             process_audio_chunk(
                 audio_segment=audio,
                 rate=16000,
@@ -188,6 +193,7 @@ class TestProcessAudioChunkMagnitudeCheck(unittest.TestCase):
                     timers=True,
                 ),
                 mqtt=MQTTConfig(),
+                ctx=StreamContext(),
             )
             # Should complete without error
 

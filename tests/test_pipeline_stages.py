@@ -135,6 +135,7 @@ for _key in list(sys.modules.keys()):
 
 import numpy as np
 from anytran.processing import process_audio_chunk, build_output_prefix, PipelineConfig, MQTTConfig
+from anytran.pipeline_config import StreamContext
 from anytran.runners.run_file_input import run_file_input
 from anytran import text_translator
 
@@ -172,6 +173,7 @@ class TestPipelineStages(unittest.TestCase):
                 lang_prefix=True,
             ),
             mqtt=MQTTConfig(),
+            ctx=StreamContext(),
         )
 
         self.assertTrue(output["output"].startswith("English: "))
@@ -204,6 +206,7 @@ class TestPipelineStages(unittest.TestCase):
                 lang_prefix=True,
             ),
             mqtt=MQTTConfig(),
+            ctx=StreamContext(),
         )
 
         self.assertTrue(output["output"].startswith("French: "))
@@ -367,6 +370,7 @@ class TestLangPrefixOption(unittest.TestCase):
                 lang_prefix=False,
             ),
             mqtt=MQTTConfig(),
+            ctx=StreamContext(),
         )
 
         self.assertEqual(output["output"], "hello world")
@@ -395,6 +399,7 @@ class TestLangPrefixOption(unittest.TestCase):
                 lang_prefix=True,
             ),
             mqtt=MQTTConfig(),
+            ctx=StreamContext(),
         )
 
         self.assertTrue(output["output"].startswith("English: "))
