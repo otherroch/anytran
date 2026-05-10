@@ -4,6 +4,7 @@ import time
 from .mqtt_client import send_mqtt_text
 from .text_translator import translate_text
 from .timing import add_timing, format_timing
+from .runner_config import RunnerConfig
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
 from .utils import normalize_lang_code
 from .vad import SILERO_AVAILABLE, has_speech_silero
@@ -61,37 +62,11 @@ def build_output_prefix(stream_id=None, detected_lang=None):
 def process_audio_chunk(
     audio_segment,
     rate,
-    input_lang,
-    output_lang,
-    magnitude_threshold,
-    model,
-    verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
+    config: RunnerConfig,
     stream_id=None,
-    scribe_vad=True,
-    voice_backend="gtts",
-    voice_model=None,
-    chat_logger=None,
-    rtsp_ip=None,
-    timers=False,
     timing_stats=None,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
     scribe_tts_segments=None,
     slate_tts_segments=None,
-    langswap_enabled=False,
-    langswap_input_lang=None,
-    langswap_output_lang=None,
-    voice_match=False,
-    lang_prefix=False,
 ):
     """
     Process an audio chunk through a 3-stage pipeline:
