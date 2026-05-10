@@ -1,7 +1,7 @@
 from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
 from anytran.audio_io import output_audio
 from anytran.normalizer import normalize_text
-from anytran.processing import process_audio_chunk
+from anytran.processing import ProcessingConfig, process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.timing import TimingsAggregator
 from anytran.utils import compute_window_params
@@ -120,19 +120,17 @@ def run_realtime_output(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
+                    config = ProcessingConfig(
+                        input_lang=input_lang,
+                        output_lang=output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
+                        mqtt_broker=mqtt_broker,
+                        mqtt_port=mqtt_port,
+                        mqtt_username=mqtt_username,
+                        mqtt_password=mqtt_password,
+                        mqtt_topic=mqtt_topic,
                         stream_id="output",
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
@@ -150,6 +148,7 @@ def run_realtime_output(
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
                     )
+                    result = process_audio_chunk(audio_segment, rate, config)
                     
                     # Deduplication: Write outputs only if not in recent window
                     if result:

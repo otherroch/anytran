@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 import time
 
@@ -10,6 +11,148 @@ from .vad import SILERO_AVAILABLE, has_speech_silero
 from .whisper_backend import translate_audio
 from .gemma4_backend import translate_audio_gemma4_combined
 from .config import get_gemma4_config
+
+
+@dataclass
+class ProcessingConfig:
+    """
+    Configuration container for processing parameters that rarely change.
+    
+    This class consolidates configuration parameters that typically remain
+    constant across multiple calls to process_audio_chunk. Using this config
+    object instead of individual parameters reduces call graph complexity
+    and improves maintainability.
+    
+    Attributes
+    ----------
+    input_lang : str or None
+        Input language code (e.g. "en", "de", "auto").
+    output_lang : str or None
+        Output language code for translation.
+    magnitude_threshold : float
+        Minimum audio magnitude to consider as non-silence (default: 0.02).
+    model : str or None
+        Speech/translation model name.
+    verbose : bool
+        If True, print diagnostic information.
+    mqtt_broker : str or None
+        MQTT broker hostname.
+    mqtt_port : int
+        MQTT broker port (default: 1883).
+    mqtt_username : str or None
+        MQTT username for authentication.
+    mqtt_password : str or None
+        MQTT password for authentication.
+    mqtt_topic : str
+        MQTT topic for publishing (default: "translation").
+    scribe_vad : bool
+        If True, use VAD to filter non-speech segments (default: True).
+    voice_backend : str
+        TTS backend: "piper" or "gtts" (default: "gtts").
+    voice_model : str or None
+        Voice model name for TTS.
+    chat_logger : object or None
+        Logger for recording recognized/translated text.
+    rtsp_ip : str or None
+        IP address of RTSP source for logging.
+    timers : bool
+        If True, collect timing information.
+    timing_stats : object or None
+        Timing statistics accumulator.
+    scribe_backend : str
+        Whisper/transcription backend (default: "auto").
+    text_translation_target : str or None
+        Target language for Stage 2 translation.
+    slate_backend : str
+        Backend for Stage 2 translation (default: "googletrans").
+    voice_lang : str or None
+        Override for Stage 3 TTS language.
+    scribe_text_file : str or None
+        File path for Stage 1 text output.
+    slate_text_file : str or None
+        File path for Stage 2 text output.
+    scribe_tts_segments : list or None
+        List to collect TTS audio segments for Stage 1.
+    slate_tts_segments : list or None
+        List to collect TTS audio segments for Stage 2.
+    voice_match : bool
+        If True, enable voice matching/cloning.
+    lang_prefix : bool
+        If True, prefix output with detected language.
+    langswap_enabled : bool
+        If True, enable language swapping mode.
+    langswap_input_lang : str or None
+        Input language for langswap mode.
+    langswap_output_lang : str or None
+        Output language for langswap mode.
+    
+    Examples
+    --------
+    >>> config = ProcessingConfig(input_lang="en", output_lang="fr")
+    >>> result = process_audio_chunk(audio, 16000, stream_id="test", config=config)
+    
+    >>> # Custom config with MQTT
+    >>> config = ProcessingConfig(
+    ...     input_lang="de",
+    ...     mqtt_broker="localhost",
+    ...     mqtt_topic="mytopic"
+    ... )
+    """
+    # Language settings
+    input_lang: str | None = None
+    output_lang: str | None = None
+    
+    # Audio processing
+    magnitude_threshold: float = 0.02
+    model: str | None = None
+    
+    # Logging/debug
+    verbose: bool = False
+    
+    # MQTT settings
+    mqtt_broker: str | None = None
+    mqtt_port: int = 1883
+    mqtt_username: str | None = None
+    mqtt_password: str | None = None
+    mqtt_topic: str = "translation"
+    
+    # VAD settings
+    scribe_vad: bool = True
+    
+    # TTS settings
+    voice_backend: str = "gtts"
+    voice_model: str | None = None
+    voice_lang: str | None = None
+    
+    # Chat/logging
+    chat_logger: object = None
+    rtsp_ip: str | None = None
+    
+    # Timing
+    timers: bool = False
+    timing_stats: object = None
+    
+    # Backend settings
+    scribe_backend: str = "auto"
+    slate_backend: str = "googletrans"
+    text_translation_target: str | None = None
+    
+    # File output
+    scribe_text_file: str | None = None
+    slate_text_file: str | None = None
+    
+    # Audio segment collectors
+    scribe_tts_segments: object = None
+    slate_tts_segments: object = None
+    
+    # Voice features
+    voice_match: bool = False
+    lang_prefix: bool = False
+    
+    # Langswap features
+    langswap_enabled: bool = False
+    langswap_input_lang: str | None = None
+    langswap_output_lang: str | None = None
 
 
 def build_output_prefix(stream_id=None, detected_lang=None):
@@ -61,38 +204,122 @@ def build_output_prefix(stream_id=None, detected_lang=None):
 def process_audio_chunk(
     audio_segment,
     rate,
-    input_lang,
-    output_lang,
-    magnitude_threshold,
-    model,
-    verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
     stream_id=None,
-    scribe_vad=True,
-    voice_backend="gtts",
+    config: ProcessingConfig = None,
+    # Backward-compatible individual parameters (override config if provided)
+    input_lang=None,
+    output_lang=None,
+    magnitude_threshold=None,
+    model=None,
+    verbose=None,
+    mqtt_broker=None,
+    mqtt_port=None,
+    mqtt_username=None,
+    mqtt_password=None,
+    mqtt_topic=None,
+    scribe_vad=None,
+    voice_backend=None,
     voice_model=None,
     chat_logger=None,
     rtsp_ip=None,
-    timers=False,
+    timers=None,
     timing_stats=None,
-    scribe_backend="auto",
+    scribe_backend=None,
     text_translation_target=None,
-    slate_backend="googletrans",
+    slate_backend=None,
     voice_lang=None,
     scribe_text_file=None,
     slate_text_file=None,
     scribe_tts_segments=None,
     slate_tts_segments=None,
-    langswap_enabled=False,
+    voice_match=None,
+    lang_prefix=None,
+    langswap_enabled=None,
     langswap_input_lang=None,
     langswap_output_lang=None,
-    voice_match=False,
-    lang_prefix=False,
 ):
+    """
+    Process an audio chunk through the translation pipeline.
+    
+    This function supports two calling styles:
+    
+    1. **New style (recommended):** Pass a ProcessingConfig object for all
+       configuration parameters that rarely change.
+       
+       Example:
+       ```python
+       config = ProcessingConfig(input_lang="en", mqtt_broker="localhost")
+       result = process_audio_chunk(audio, 16000, stream_id="test", config=config)
+       ```
+    
+    2. **Legacy style:** Pass individual parameters directly (for backward
+       compatibility). Individual parameters override config values.
+    
+    Parameters
+    ----------
+    audio_segment : np.ndarray
+        1‑D array of raw PCM audio samples for the chunk to process.
+    rate : int
+        Sample rate in Hz for ``audio_segment``.
+    stream_id : str or int or None, optional
+        Identifier for the current audio stream or session.
+    config : ProcessingConfig, optional
+        Configuration object containing all processing parameters.
+        Individual parameters below override corresponding config values.
+    input_lang, output_lang, magnitude_threshold, model, verbose,
+    mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic,
+    scribe_vad, voice_backend, voice_model, chat_logger, rtsp_ip,
+    timers, timing_stats, scribe_backend, text_translation_target,
+    slate_backend, voice_lang, scribe_text_file, slate_text_file,
+    scribe_tts_segments, slate_tts_segments, voice_match, lang_prefix,
+    langswap_enabled, langswap_input_lang, langswap_output_lang : optional
+        Individual parameters that override corresponding values in ``config``
+        if both are provided. See ProcessingConfig for parameter descriptions.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'output': Final formatted output text
+        - 'scribe': Stage 1 English transcription text
+        - 'slate': Stage 2 translated text (if applicable)
+        - 'final_lang': Final output language code
+    """
+    # Resolve parameters: individual params override config values
+    if config is None:
+        config = ProcessingConfig()
+    
+    # Use individual param if provided (and not None), else use config default
+    input_lang = input_lang if input_lang is not None else config.input_lang
+    output_lang = output_lang if output_lang is not None else config.output_lang
+    magnitude_threshold = magnitude_threshold if magnitude_threshold is not None else config.magnitude_threshold
+    model = model if model is not None else config.model
+    verbose = verbose if verbose is not None else config.verbose
+    mqtt_broker = mqtt_broker if mqtt_broker is not None else config.mqtt_broker
+    mqtt_port = mqtt_port if mqtt_port is not None else config.mqtt_port
+    mqtt_username = mqtt_username if mqtt_username is not None else config.mqtt_username
+    mqtt_password = mqtt_password if mqtt_password is not None else config.mqtt_password
+    mqtt_topic = mqtt_topic if mqtt_topic is not None else config.mqtt_topic
+    scribe_vad = scribe_vad if scribe_vad is not None else config.scribe_vad
+    voice_backend = voice_backend if voice_backend is not None else config.voice_backend
+    voice_model = voice_model if voice_model is not None else config.voice_model
+    chat_logger = chat_logger if chat_logger is not None else config.chat_logger
+    rtsp_ip = rtsp_ip if rtsp_ip is not None else config.rtsp_ip
+    timers = timers if timers is not None else config.timers
+    timing_stats = timing_stats if timing_stats is not None else config.timing_stats
+    scribe_backend = scribe_backend if scribe_backend is not None else config.scribe_backend
+    text_translation_target = text_translation_target if text_translation_target is not None else config.text_translation_target
+    slate_backend = slate_backend if slate_backend is not None else config.slate_backend
+    voice_lang = voice_lang if voice_lang is not None else config.voice_lang
+    scribe_text_file = scribe_text_file if scribe_text_file is not None else config.scribe_text_file
+    slate_text_file = slate_text_file if slate_text_file is not None else config.slate_text_file
+    scribe_tts_segments = scribe_tts_segments if scribe_tts_segments is not None else config.scribe_tts_segments
+    slate_tts_segments = slate_tts_segments if slate_tts_segments is not None else config.slate_tts_segments
+    voice_match = voice_match if voice_match is not None else config.voice_match
+    lang_prefix = lang_prefix if lang_prefix is not None else config.lang_prefix
+    langswap_enabled = langswap_enabled if langswap_enabled is not None else config.langswap_enabled
+    langswap_input_lang = langswap_input_lang if langswap_input_lang is not None else config.langswap_input_lang
+    langswap_output_lang = langswap_output_lang if langswap_output_lang is not None else config.langswap_output_lang
     """
     Process an audio chunk through a 3-stage pipeline:
     

@@ -1,5 +1,5 @@
 from anytran.audio_io import load_audio_any, output_audio
-from anytran.processing import build_output_prefix, process_audio_chunk
+from anytran.processing import ProcessingConfig, build_output_prefix, process_audio_chunk
 from anytran.text_translator import translate_text, get_translategemma_model, get_metanllb_model
 from anytran.mqtt_client import init_mqtt, send_mqtt_text
 from anytran.normalizer import normalize_text, split_into_sentences
@@ -464,19 +464,18 @@ def run_file_input(
             audio_segment = audio[start : start + chunk]
             if audio_segment.size == 0:
                 break
-            result = process_audio_chunk(
-                audio_segment,
-                rate,
-                input_lang,
-                output_lang,
-                magnitude_threshold,
-                model,
-                verbose,
-                mqtt_broker,
-                mqtt_port,
-                mqtt_username,
-                mqtt_password,
-                mqtt_topic,
+            # Build ProcessingConfig with all configuration parameters
+            config = ProcessingConfig(
+                input_lang=input_lang,
+                output_lang=output_lang,
+                magnitude_threshold=magnitude_threshold,
+                model=model,
+                verbose=verbose,
+                mqtt_broker=mqtt_broker,
+                mqtt_port=mqtt_port,
+                mqtt_username=mqtt_username,
+                mqtt_password=mqtt_password,
+                mqtt_topic=mqtt_topic,
                 stream_id="file",
                 scribe_vad=scribe_vad,
                 voice_backend=voice_backend,
@@ -494,6 +493,7 @@ def run_file_input(
                 voice_match=voice_match,
                 lang_prefix=lang_prefix,
             )
+            result = process_audio_chunk(audio_segment, rate, config)
 
             # Deduplication: Write outputs only if different from last ones
             if result:

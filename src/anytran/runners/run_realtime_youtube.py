@@ -1,5 +1,5 @@
 from anytran.stream_youtube import extract_youtube_video_id, validate_youtube_video, parse_iso8601_duration, get_youtube_audio_stream_url, stream_youtube_audio
-from anytran.processing import process_audio_chunk
+from anytran.processing import ProcessingConfig, process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.normalizer import normalize_text
 from anytran.timing import TimingsAggregator
@@ -172,19 +172,17 @@ def run_realtime_youtube(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
+                    config = ProcessingConfig(
+                        input_lang=input_lang,
+                        output_lang=output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
+                        mqtt_broker=mqtt_broker,
+                        mqtt_port=mqtt_port,
+                        mqtt_username=mqtt_username,
+                        mqtt_password=mqtt_password,
+                        mqtt_topic=mqtt_topic,
                         stream_id="youtube",
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
@@ -202,6 +200,7 @@ def run_realtime_youtube(
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
                     )
+                    result = process_audio_chunk(audio_segment, rate, config)
                     
                     # Deduplication: Write outputs only if not in recent window
                     if result:
@@ -264,19 +263,17 @@ def run_realtime_youtube(
             if verbose:
                 print("Processing final audio buffer...")
             try:
-                result = process_audio_chunk(
-                    buffer,
-                    rate,
-                    input_lang,
-                    output_lang,
-                    magnitude_threshold,
-                    model,
-                    verbose,
-                    mqtt_broker,
-                    mqtt_port,
-                    mqtt_username,
-                    mqtt_password,
-                    mqtt_topic,
+                config_final = ProcessingConfig(
+                    input_lang=input_lang,
+                    output_lang=output_lang,
+                    magnitude_threshold=magnitude_threshold,
+                    model=model,
+                    verbose=verbose,
+                    mqtt_broker=mqtt_broker,
+                    mqtt_port=mqtt_port,
+                    mqtt_username=mqtt_username,
+                    mqtt_password=mqtt_password,
+                    mqtt_topic=mqtt_topic,
                     stream_id="youtube",
                     scribe_vad=scribe_vad,
                     voice_backend=voice_backend,
@@ -294,6 +291,7 @@ def run_realtime_youtube(
                     voice_match=voice_match,
                     lang_prefix=lang_prefix,
                 )
+                result = process_audio_chunk(buffer, rate, config_final)
                 
                 # Deduplication: Write outputs only if different from last ones
                 if result:
