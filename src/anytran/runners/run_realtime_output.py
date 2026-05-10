@@ -1,6 +1,7 @@
 from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
 from anytran.audio_io import output_audio
 from anytran.normalizer import normalize_text
+from anytran.pipeline_config import MQTTConfig, PipelineConfig
 from anytran.processing import process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.timing import TimingsAggregator
@@ -46,7 +47,7 @@ def run_realtime_output(
     normalize=True,
     capture_voice_path=None,
 ):
-    print("Starting real-time system output audio translation...")
+    print("Starting real-time system output audio translation. ..")
     print(f"Input language: {input_lang}, Output language: {output_lang}")
     if output_audio_path:
         print(f"Output audio will be saved to: {output_audio_path}")
@@ -120,35 +121,40 @@ def run_realtime_output(
                 if len(buffer) >= chunk:
                     audio_segment = buffer[:chunk]
                     buffer = buffer[chunk - overlap :]
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        input_lang,
-                        output_lang,
-                        magnitude_threshold,
-                        model,
-                        verbose,
-                        mqtt_broker,
-                        mqtt_port,
-                        mqtt_username,
-                        mqtt_password,
-                        mqtt_topic,
-                        stream_id="output",
+                    pipeline_cfg = PipelineConfig(
+                        input_lang=input_lang,
+                        output_lang=output_lang,
+                        magnitude_threshold=magnitude_threshold,
+                        model=model,
+                        verbose=verbose,
                         scribe_vad=scribe_vad,
                         voice_backend=voice_backend,
                         voice_model=voice_model,
                         timers=timers,
-                        timing_stats=timing_stats,
                         scribe_backend=scribe_backend,
                         text_translation_target=text_translation_target,
                         slate_backend=slate_backend,
                         voice_lang=voice_lang,
-                        scribe_text_file=None,
-                        slate_text_file=None,
-                        scribe_tts_segments=scribe_audio_segments,
-                        slate_tts_segments=slate_audio_segments,
                         voice_match=voice_match,
                         lang_prefix=lang_prefix,
+                    )
+                    mqtt_cfg = MQTTConfig(
+                        broker=mqtt_broker,
+                        port=mqtt_port,
+                        username=mqtt_username,
+                        password=mqtt_password,
+                        topic=mqtt_topic,
+                    ) if mqtt_broker else None
+
+                    result = process_audio_chunk(
+                        audio_segment,
+                        rate,
+                        pipeline_cfg,
+                        mqtt_cfg,
+                        stream_id="output",
+                        timing_stats=timing_stats,
+                        scribe_tts_segments=scribe_audio_segments,
+                        slate_tts_segments=slate_audio_segments,
                     )
                     
                     # Deduplication: Write outputs only if not in recent window

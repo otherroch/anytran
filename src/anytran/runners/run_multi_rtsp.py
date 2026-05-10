@@ -2,6 +2,7 @@ from anytran.audio_io import output_audio
 from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
 from anytran.mqtt_client import init_mqtt
 from anytran.normalizer import normalize_text
+from anytran.pipeline_config import MQTTConfig, PipelineConfig
 from anytran.processing import process_audio_chunk
 from anytran.stream_rtsp import stream_rtsp_audio
 from anytran.timing import TimingsAggregator
@@ -119,37 +120,42 @@ def run_multi_rtsp(
                     if len(buffer) >= chunk:
                         audio_segment = buffer[:chunk]
                         buffer = buffer[chunk - overlap :]
-                        result = process_audio_chunk(
-                            audio_segment,
-                            rate,
-                            input_lang,
-                            output_lang,
-                            magnitude_threshold,
-                            model,
-                            verbose,
-                            mqtt_broker,
-                            mqtt_port,
-                            mqtt_username,
-                            mqtt_password,
-                            stream_mqtt_topic,
-                            stream_id=idx,
+                        pipeline_cfg = PipelineConfig(
+                            input_lang=input_lang,
+                            output_lang=output_lang,
+                            magnitude_threshold=magnitude_threshold,
+                            model=model,
+                            verbose=verbose,
                             scribe_vad=scribe_vad,
                             voice_backend=voice_backend,
                             voice_model=voice_model,
-                            chat_logger=chat_logger,
-                            rtsp_ip=rtsp_ip,
                             timers=timers,
-                            timing_stats=timing_stats,
                             scribe_backend=scribe_backend,
                             text_translation_target=text_translation_target,
                             slate_backend=slate_backend,
                             voice_lang=voice_lang,
-                            scribe_text_file=None,
-                            slate_text_file=None,
-                            scribe_tts_segments=local_scribe_audio_segments,
-                            slate_tts_segments=local_slate_audio_segments,
                             voice_match=voice_match,
                             lang_prefix=lang_prefix,
+                            chat_logger=chat_logger,
+                            rtsp_ip=rtsp_ip,
+                        )
+                        mqtt_cfg = MQTTConfig(
+                            broker=mqtt_broker,
+                            port=mqtt_port,
+                            username=mqtt_username,
+                            password=mqtt_password,
+                            topic=stream_mqtt_topic,
+                        ) if mqtt_broker else None
+
+                        result = process_audio_chunk(
+                            audio_segment,
+                            rate,
+                            pipeline_cfg,
+                            mqtt_cfg,
+                            stream_id=idx,
+                            timing_stats=timing_stats,
+                            scribe_tts_segments=local_scribe_audio_segments,
+                            slate_tts_segments=local_slate_audio_segments,
                         )
                         # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                         if result:

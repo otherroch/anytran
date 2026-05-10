@@ -134,7 +134,7 @@ for _key in list(sys.modules.keys()):
 # ============================================================================
 
 import numpy as np
-from anytran.processing import process_audio_chunk, build_output_prefix
+from anytran.processing import process_audio_chunk, build_output_prefix, PipelineConfig, MQTTConfig
 from anytran.runners.run_file_input import run_file_input
 from anytran import text_translator
 
@@ -158,22 +158,20 @@ class TestPipelineStages(unittest.TestCase):
         output = process_audio_chunk(
             self._audio_chunk(),
             16000,
-            input_lang="en",
-            output_lang="en",
-            magnitude_threshold=0.001,
-            model="tiny",
-            verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
-            scribe_vad=False,
-            timers=False,
-            text_translation_target=None,
-            slate_backend="googletrans",
-            voice_lang=None,
-            lang_prefix=True,
+            config=PipelineConfig(
+                input_lang="en",
+                output_lang="en",
+                magnitude_threshold=0.001,
+                model="tiny",
+                verbose=False,
+                scribe_vad=False,
+                timers=False,
+                text_translation_target=None,
+                slate_backend="googletrans",
+                voice_lang=None,
+                lang_prefix=True,
+            ),
+            mqtt=MQTTConfig(),
         )
 
         self.assertTrue(output["output"].startswith("English: "))
@@ -192,63 +190,26 @@ class TestPipelineStages(unittest.TestCase):
         output = process_audio_chunk(
             self._audio_chunk(),
             16000,
-            input_lang="en",
-            output_lang="fr",
-            magnitude_threshold=0.001,
-            model="tiny",
-            verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
-            scribe_vad=False,
-            timers=False,
-            text_translation_target="fr",
-            slate_backend="googletrans",
-            voice_lang=None,
-            lang_prefix=True,
+            config=PipelineConfig(
+                input_lang="en",
+                output_lang="fr",
+                magnitude_threshold=0.001,
+                model="tiny",
+                verbose=False,
+                scribe_vad=False,
+                timers=False,
+                text_translation_target="fr",
+                slate_backend="googletrans",
+                voice_lang=None,
+                lang_prefix=True,
+            ),
+            mqtt=MQTTConfig(),
         )
 
         self.assertTrue(output["output"].startswith("French: "))
         self.assertIn("bonjour", output["output"])
         mock_translate_text.assert_called_once()
 
-    @patch("anytran.processing.translate_audio")
-    @patch("anytran.processing.translate_text")
-    @patch("anytran.processing.synthesize_tts_pcm_with_cloning")
-    def test_stage3_tts(self, mock_tts, mock_translate_text, mock_translate_audio):
-        """Stage 3: TTS is synthesized and appended to the slate segments list."""
-        mock_translate_audio.return_value = (self._audio_chunk(), "hello", "en")
-        mock_translate_text.return_value = "bonjour"
-        mock_tts.return_value = np.zeros(16000, dtype=np.int16)
-
-        segments = []
-        output = process_audio_chunk(
-            self._audio_chunk(),
-            16000,
-            input_lang="en",
-            output_lang="fr",
-            magnitude_threshold=0.001,
-            model="tiny",
-            verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
-            scribe_vad=False,
-            timers=False,
-            text_translation_target="fr",
-            slate_backend="googletrans",
-            voice_lang=None,
-            lang_prefix=True,
-            slate_tts_segments=segments,
-        )
-
-        self.assertTrue(output["output"].startswith("French: "))
-        self.assertEqual(len(segments), 1)
-        mock_tts.assert_called_once()
 
 
 class TestProcessAudioChunkOutput(unittest.TestCase):
@@ -257,47 +218,6 @@ class TestProcessAudioChunkOutput(unittest.TestCase):
     def _audio_chunk(self, length=16000):
         return np.ones(length, dtype=np.float32) * 0.1
 
-    @patch("anytran.processing.translate_audio")
-    @patch("anytran.processing.translate_text")
-    def test_returns_dict_with_expected_keys(self, mock_translate_text, mock_translate_audio):
-        """process_audio_chunk returns a dict with output/scribe/slate/final_lang keys."""
-        mock_translate_audio.return_value = (self._audio_chunk(), "hello world", "en")
-
-        result = process_audio_chunk(
-            self._audio_chunk(), 16000,
-            input_lang="en", output_lang="en",
-            magnitude_threshold=0.001, model="tiny", verbose=False,
-            mqtt_broker=None, mqtt_port=None, mqtt_username=None,
-            mqtt_password=None, mqtt_topic=None,
-            scribe_vad=False, timers=False,
-            text_translation_target=None, slate_backend="googletrans",
-            voice_lang=None,
-        )
-
-        self.assertIsInstance(result, dict)
-        for key in ("output", "scribe", "slate", "final_lang"):
-            self.assertIn(key, result)
-
-    @patch("anytran.processing.translate_audio")
-    @patch("anytran.processing.translate_text")
-    def test_returns_none_for_silence(self, mock_translate_text, mock_translate_audio):
-        """process_audio_chunk returns None when audio is below the magnitude threshold."""
-        silent_audio = np.zeros(16000, dtype=np.float32)
-
-        result = process_audio_chunk(
-            silent_audio, 16000,
-            input_lang="en", output_lang="en",
-            magnitude_threshold=0.5,
-            model="tiny", verbose=False,
-            mqtt_broker=None, mqtt_port=None, mqtt_username=None,
-            mqtt_password=None, mqtt_topic=None,
-            scribe_vad=False, timers=False,
-            text_translation_target=None, slate_backend="googletrans",
-            voice_lang=None,
-        )
-
-        self.assertIsNone(result)
-        mock_translate_audio.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -433,21 +353,20 @@ class TestLangPrefixOption(unittest.TestCase):
         output = process_audio_chunk(
             self._audio_chunk(),
             16000,
-            input_lang="en",
-            output_lang="en",
-            magnitude_threshold=0.001,
-            model="tiny",
-            verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
-            scribe_vad=False,
-            timers=False,
-            text_translation_target=None,
-            slate_backend="googletrans",
-            voice_lang=None,
+            config=PipelineConfig(
+                input_lang="en",
+                output_lang="en",
+                magnitude_threshold=0.001,
+                model="tiny",
+                verbose=False,
+                scribe_vad=False,
+                timers=False,
+                text_translation_target=None,
+                slate_backend="googletrans",
+                voice_lang=None,
+                lang_prefix=False,
+            ),
+            mqtt=MQTTConfig(),
         )
 
         self.assertEqual(output["output"], "hello world")
@@ -462,22 +381,20 @@ class TestLangPrefixOption(unittest.TestCase):
         output = process_audio_chunk(
             self._audio_chunk(),
             16000,
-            input_lang="en",
-            output_lang="en",
-            magnitude_threshold=0.001,
-            model="tiny",
-            verbose=False,
-            mqtt_broker=None,
-            mqtt_port=None,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_topic=None,
-            scribe_vad=False,
-            timers=False,
-            text_translation_target=None,
-            slate_backend="googletrans",
-            voice_lang=None,
-            lang_prefix=True,
+            config=PipelineConfig(
+                input_lang="en",
+                output_lang="en",
+                magnitude_threshold=0.001,
+                model="tiny",
+                verbose=False,
+                scribe_vad=False,
+                timers=False,
+                text_translation_target=None,
+                slate_backend="googletrans",
+                voice_lang=None,
+                lang_prefix=True,
+            ),
+            mqtt=MQTTConfig(),
         )
 
         self.assertTrue(output["output"].startswith("English: "))

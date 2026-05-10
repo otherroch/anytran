@@ -1,7 +1,9 @@
 import numpy as np
 import time
+from typing import Optional
 
 from .mqtt_client import send_mqtt_text
+from .pipeline_config import MQTTConfig, PipelineConfig
 from .text_translator import translate_text
 from .timing import add_timing, format_timing
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
@@ -59,40 +61,77 @@ def build_output_prefix(stream_id=None, detected_lang=None):
 
 
 def process_audio_chunk(
-    audio_segment,
-    rate,
-    input_lang,
-    output_lang,
-    magnitude_threshold,
-    model,
-    verbose,
-    mqtt_broker,
-    mqtt_port,
-    mqtt_username,
-    mqtt_password,
-    mqtt_topic,
-    stream_id=None,
-    scribe_vad=True,
-    voice_backend="gtts",
-    voice_model=None,
-    chat_logger=None,
-    rtsp_ip=None,
-    timers=False,
-    timing_stats=None,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    scribe_tts_segments=None,
-    slate_tts_segments=None,
-    langswap_enabled=False,
-    langswap_input_lang=None,
-    langswap_output_lang=None,
-    voice_match=False,
-    lang_prefix=False,
+    audio_segment: np.ndarray,
+    rate: int,
+    config: PipelineConfig,
+    mqtt: Optional[MQTTConfig] = None,
+    *,
+    stream_id = None,
+    chat_logger = None,
+    rtsp_ip = None,
+    timing_stats = None,
+    scribe_tts_segments = None,
+    slate_tts_segments = None,
 ):
+    """
+    Process an audio chunk through a 3-stage pipeline.
+
+    Parameters
+    ----------
+    audio_segment : np.ndarray
+        1-D array of raw PCM audio samples for the chunk to process.
+    rate : int
+        Sample rate in Hz for ``audio_segment``.
+    config : PipelineConfig
+        Pipeline-wide settings (language, model, backends, timing, etc.).
+    mqtt : MQTTConfig or None
+        MQTT broker settings. ``None`` disables MQTT output.
+    stream_id : str, int or None
+        Identifier for the current stream (logging only).
+    chat_logger : callable or object or None
+        Logger for recording recognized/translated text.
+    rtsp_ip : str or None
+        IP/URL associated with an RTSP source (logging only).
+    timing_stats : dict or None
+        Accumulator for timing statistics across multiple calls.
+    scribe_tts_segments : list or None
+        If provided, append synthesized scribe (English) TTS PCM here.
+    slate_tts_segments : list or None
+        If provided, append synthesized slate (translated) TTS PCM here.
+    """
+    # ---- unpack config for local use so existing body still works -------
+    input_lang = config.input_lang
+    output_lang = config.output_lang
+    magnitude_threshold = config.magnitude_threshold
+    model = config.model
+    verbose = config.verbose
+    scribe_vad = config.scribe_vad
+    voice_backend = config.voice_backend
+    voice_model = config.voice_model
+    timers = config.timers
+    scribe_backend = config.scribe_backend
+    text_translation_target = config.text_translation_target
+    slate_backend = config.slate_backend
+    voice_lang = config.voice_lang
+    langswap_enabled = config.langswap_enabled
+    langswap_input_lang = config.langswap_input_lang
+    langswap_output_lang = config.langswap_output_lang
+    voice_match = config.voice_match
+    lang_prefix = config.lang_prefix
+
+    # MQTT may be None (disabled)
+    if mqtt is not None:
+        mqtt_broker = mqtt.broker
+        mqtt_port = mqtt.port
+        mqtt_username = mqtt.username
+        mqtt_password = mqtt.password
+        mqtt_topic = mqtt.topic
+    else:
+        mqtt_broker = None
+        mqtt_port = 1883
+        mqtt_username = None
+        mqtt_password = None
+        mqtt_topic = None
     """
     Process an audio chunk through a 3-stage pipeline:
     
