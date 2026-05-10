@@ -3,7 +3,7 @@ import time
 from typing import Optional
 
 from .mqtt_client import send_mqtt_text
-from .pipeline_config import MQTTConfig, PipelineConfig
+from .pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from .text_translator import translate_text
 from .timing import add_timing, format_timing
 from .tts import play_output, synthesize_tts_pcm, synthesize_tts_pcm_with_cloning
@@ -64,14 +64,8 @@ def process_audio_chunk(
     audio_segment: np.ndarray,
     rate: int,
     config: PipelineConfig,
+    ctx: StreamContext,
     mqtt: Optional[MQTTConfig] = None,
-    *,
-    stream_id = None,
-    chat_logger = None,
-    rtsp_ip = None,
-    timing_stats = None,
-    scribe_tts_segments = None,
-    slate_tts_segments = None,
 ):
     """
     Process an audio chunk through a 3-stage pipeline.
@@ -84,20 +78,10 @@ def process_audio_chunk(
         Sample rate in Hz for ``audio_segment``.
     config : PipelineConfig
         Pipeline-wide settings (language, model, backends, timing, etc.).
+    ctx : StreamContext
+        Per-stream mutable state (TTS segments, timing stats, logging, etc.).
     mqtt : MQTTConfig or None
         MQTT broker settings. ``None`` disables MQTT output.
-    stream_id : str, int or None
-        Identifier for the current stream (logging only).
-    chat_logger : callable or object or None
-        Logger for recording recognized/translated text.
-    rtsp_ip : str or None
-        IP/URL associated with an RTSP source (logging only).
-    timing_stats : dict or None
-        Accumulator for timing statistics across multiple calls.
-    scribe_tts_segments : list or None
-        If provided, append synthesized scribe (English) TTS PCM here.
-    slate_tts_segments : list or None
-        If provided, append synthesized slate (translated) TTS PCM here.
     """
     # ---- unpack config for local use so existing body still works -------
     input_lang = config.input_lang
@@ -118,6 +102,14 @@ def process_audio_chunk(
     langswap_output_lang = config.langswap_output_lang
     voice_match = config.voice_match
     lang_prefix = config.lang_prefix
+
+    # Unpack stream context
+    stream_id = ctx.stream_id
+    chat_logger = ctx.chat_logger
+    rtsp_ip = ctx.rtsp_ip
+    timing_stats = ctx.timing_stats
+    scribe_tts_segments = ctx.scribe_tts_segments
+    slate_tts_segments = ctx.slate_tts_segments
 
     # MQTT may be None (disabled)
     if mqtt is not None:

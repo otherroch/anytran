@@ -214,3 +214,39 @@ class OutputConfig:
     slate_text_file: Optional[str] = None
     capture_voice_path: Optional[str] = None
     chat_log_dir: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Stream context (per-stream mutable state)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StreamContext:
+    """Mutable state that lives for the lifetime of one audio stream.
+
+    This groups the parameters that change per-stream but are constant per-
+    *call* to ``process_audio_chunk``, allowing us to drop six individual
+    keyword arguments in favour of a single ``ctx`` parameter.
+
+    Parameters
+    ----------
+    stream_id : str, int or None
+        Human-readable identifier for the stream (logging only).
+    timing_stats : object or None
+        Accumulator for timing statistics (``TimingsAggregator`` instance).
+    scribe_tts_segments : list or None
+        Collected PCM segments for scribe (English) TTS audio.
+    slate_tts_segments : list or None
+        Collected PCM segments for slate (translated) TTS audio.
+    chat_logger : object or None
+        ChatLogger instance (RTSP chat logging).
+    rtsp_ip : str or None
+        IP address extracted from RTSP URL (RTSP chat logging).
+    """
+
+    stream_id: Optional[str] = None
+    timing_stats: Optional[object] = None
+    scribe_tts_segments: Optional[List] = None
+    slate_tts_segments: Optional[List] = None
+    chat_logger: Optional[object] = None
+    rtsp_ip: Optional[str] = None

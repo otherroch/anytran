@@ -1,5 +1,5 @@
 from anytran.audio_io import load_audio_any, output_audio
-from anytran.pipeline_config import MQTTConfig, PipelineConfig
+from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from anytran.processing import build_output_prefix, process_audio_chunk
 from anytran.text_translator import translate_text, get_translategemma_model, get_metanllb_model
 from anytran.mqtt_client import init_mqtt, send_mqtt_text
@@ -491,15 +491,19 @@ def run_file_input(
                 topic=mqtt_topic,
             ) if mqtt_broker else None
 
-            result = process_audio_chunk(
-                audio_segment,
-                rate,
-                pipeline_cfg,
-                mqtt_cfg,
+            stream_ctx = StreamContext(
                 stream_id="file",
                 timing_stats=timing_stats,
                 scribe_tts_segments=audio_segments,
                 slate_tts_segments=slate_audio_segments,
+            )
+
+            result = process_audio_chunk(
+                audio_segment,
+                rate,
+                pipeline_cfg,
+                stream_ctx,
+                mqtt_cfg,
             )
 
             # Deduplication: Write outputs only if different from last ones

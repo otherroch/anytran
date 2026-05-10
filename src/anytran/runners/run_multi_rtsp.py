@@ -2,7 +2,7 @@ from anytran.audio_io import output_audio
 from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
 from anytran.mqtt_client import init_mqtt
 from anytran.normalizer import normalize_text
-from anytran.pipeline_config import MQTTConfig, PipelineConfig
+from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from anytran.processing import process_audio_chunk
 from anytran.stream_rtsp import stream_rtsp_audio
 from anytran.timing import TimingsAggregator
@@ -136,8 +136,6 @@ def run_multi_rtsp(
                             voice_lang=voice_lang,
                             voice_match=voice_match,
                             lang_prefix=lang_prefix,
-                            chat_logger=chat_logger,
-                            rtsp_ip=rtsp_ip,
                         )
                         mqtt_cfg = MQTTConfig(
                             broker=mqtt_broker,
@@ -147,15 +145,21 @@ def run_multi_rtsp(
                             topic=stream_mqtt_topic,
                         ) if mqtt_broker else None
 
+                        stream_ctx = StreamContext(
+                            stream_id=idx,
+                            chat_logger=chat_logger,
+                            rtsp_ip=rtsp_ip,
+                            timing_stats=timing_stats,
+                            scribe_tts_segments=local_scribe_audio_segments,
+                            slate_tts_segments=local_slate_audio_segments,
+                        )
+
                         result = process_audio_chunk(
                             audio_segment,
                             rate,
                             pipeline_cfg,
+                            stream_ctx,
                             mqtt_cfg,
-                            stream_id=idx,
-                            timing_stats=timing_stats,
-                            scribe_tts_segments=local_scribe_audio_segments,
-                            slate_tts_segments=local_slate_audio_segments,
                         )
                         # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                         if result:

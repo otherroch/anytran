@@ -1,7 +1,7 @@
 from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
 from anytran.audio_io import output_audio
 from anytran.normalizer import normalize_text
-from anytran.pipeline_config import MQTTConfig, PipelineConfig
+from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from anytran.processing import process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.timing import TimingsAggregator
@@ -146,15 +146,19 @@ def run_realtime_output(
                         topic=mqtt_topic,
                     ) if mqtt_broker else None
 
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        pipeline_cfg,
-                        mqtt_cfg,
+                    stream_ctx = StreamContext(
                         stream_id="output",
                         timing_stats=timing_stats,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
+                    )
+
+                    result = process_audio_chunk(
+                        audio_segment,
+                        rate,
+                        pipeline_cfg,
+                        stream_ctx,
+                        mqtt_cfg,
                     )
                     
                     # Deduplication: Write outputs only if not in recent window

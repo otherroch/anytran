@@ -1,5 +1,5 @@
 from anytran.stream_youtube import extract_youtube_video_id, validate_youtube_video, parse_iso8601_duration, get_youtube_audio_stream_url, stream_youtube_audio
-from anytran.pipeline_config import MQTTConfig, PipelineConfig
+from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from anytran.processing import process_audio_chunk
 from anytran.mqtt_client import init_mqtt
 from anytran.normalizer import normalize_text
@@ -198,15 +198,19 @@ def run_realtime_youtube(
                         topic=mqtt_topic,
                     ) if mqtt_broker else None
 
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        pipeline_cfg,
-                        mqtt_cfg,
+                    stream_ctx = StreamContext(
                         stream_id="youtube",
                         timing_stats=timing_stats,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
+                    )
+
+                    result = process_audio_chunk(
+                        audio_segment,
+                        rate,
+                        pipeline_cfg,
+                        stream_ctx,
+                        mqtt_cfg,
                     )
                     
                     # Deduplication: Write outputs only if not in recent window
@@ -295,15 +299,19 @@ def run_realtime_youtube(
                     topic=mqtt_topic,
                 ) if mqtt_broker else None
 
-                result = process_audio_chunk(
-                    buffer,
-                    rate,
-                    pipeline_cfg,
-                    mqtt_cfg,
+                stream_ctx = StreamContext(
                     stream_id="youtube",
                     timing_stats=timing_stats,
                     scribe_tts_segments=scribe_audio_segments,
                     slate_tts_segments=slate_audio_segments,
+                )
+
+                result = process_audio_chunk(
+                    buffer,
+                    rate,
+                    pipeline_cfg,
+                    stream_ctx,
+                    mqtt_cfg,
                 )
                 
                 # Deduplication: Write outputs only if different from last ones

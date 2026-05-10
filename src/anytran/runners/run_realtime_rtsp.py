@@ -2,7 +2,7 @@ from anytran.audio_io import load_audio_any, output_audio
 from anytran.chatlog import ChatLogger, extract_ip_from_rtsp_url
 from anytran.mqtt_client import init_mqtt, send_mqtt_text
 from anytran.normalizer import normalize_text
-from anytran.pipeline_config import MQTTConfig, PipelineConfig
+from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
 from anytran.processing import build_output_prefix, process_audio_chunk
 from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
 from anytran.stream_rtsp import stream_rtsp_audio
@@ -157,17 +157,21 @@ def run_realtime_rtsp(
                         topic=mqtt_topic,
                     ) if mqtt_broker else None
 
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        pipeline_cfg,
-                        mqtt_cfg,
+                    stream_ctx = StreamContext(
                         stream_id="rtsp",
                         chat_logger=chat_logger,
                         rtsp_ip=rtsp_ip,
                         timing_stats=timing_stats,
                         scribe_tts_segments=scribe_audio_segments,
                         slate_tts_segments=slate_audio_segments,
+                    )
+
+                    result = process_audio_chunk(
+                        audio_segment,
+                        rate,
+                        pipeline_cfg,
+                        stream_ctx,
+                        mqtt_cfg,
                     )
                     # Deduplication: Write outputs only if not in recent window (if dedup enabled)
                     if result:
