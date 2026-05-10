@@ -18,46 +18,46 @@ from anytran import processing
 @mock.patch('anytran.processing.translate_audio')
 def test_langswap_slate_uses_tts_lang(mock_translate_audio, mock_translate_text, mock_synthesize):
     """Test that langswap scenario uses tts_lang instead of hardcoded 'en'."""
-    
+
     captured_calls = []
-    
+
     def capture_synthesize(text, rate, output_lang, **kwargs):
         captured_calls.append({
             'text': text,
             'language': output_lang,
         })
         return np.zeros(1000, dtype=np.int16)
-    
+
     mock_synthesize.side_effect = capture_synthesize
     mock_translate_audio.return_value = (np.zeros(16000, dtype=np.int16), "Hello world", "en")
-    mock_translate_text.return_value = None
-    
+    # Must return a translation so Stage 2 runs and sets stage2_ran = True
+    mock_translate_text.return_value = "Bonjour le monde"
+
     audio_segment = (np.random.randn(16000) * 1000).astype(np.int16)
     slate_tts_segments = []
-    
-    # Simulate langswap scenario with voice_lang override
-    from anytran.pipeline_config import PipelineConfig, TTSConfig
+
+    # Use non-English text_translation_target so Stage 2 runs, which triggers
+    # the slate TTS synthesis path (line: if stage2_ran and translated_text ...)
+    from anytran.pipeline_config import PipelineConfig
     result = processing.process_audio_chunk(
-        audio_segment=audio_segment,
-        rate=16000,
-        config=PipelineConfig(
+        audio_segment,
+        16000,
+        PipelineConfig(
             input_lang="en",
             output_lang="en",
             magnitude_threshold=0.001,
             model="small",
             verbose=False,
             scribe_backend="auto",
-            text_translation_target="en",  # English target
+            text_translation_target="fr",  # French target so Stage 2 runs
             slate_backend="googletrans",
-        ),
-        tts_config=TTSConfig(
             voice_backend="gtts",
             voice_model=None,
             voice_lang="fr",  # Override to French!
         ),
+        stream_id=None,
+        timing_stats=None,
         slate_tts_segments=slate_tts_segments,
-        voice_match=False,
-        lang_prefix=False,
     )
     
     # Should have generated slate audio in French (from voice_lang)
@@ -71,30 +71,30 @@ def test_langswap_slate_uses_tts_lang(mock_translate_audio, mock_translate_text,
 @mock.patch('anytran.processing.translate_audio')
 def test_scribe_and_slate_both_generated_during_translation(mock_translate_audio, mock_translate_text, mock_synthesize):
     """Test that both scribe and slate are generated when translating."""
-    
+
     captured_calls = []
-    
+
     def capture_synthesize(text, rate, output_lang, **kwargs):
         captured_calls.append({
             'text': text,
             'language': output_lang,
         })
         return np.zeros(1000, dtype=np.int16)
-    
+
     mock_synthesize.side_effect = capture_synthesize
     mock_translate_audio.return_value = (np.zeros(16000, dtype=np.int16), "Hello world", "en")
     mock_translate_text.return_value = "Bonjour le monde"
-    
+
     audio_segment = (np.random.randn(16000) * 1000).astype(np.int16)
     scribe_tts_segments = []
     slate_tts_segments = []
-    
+
     # Process with translation
-    from anytran.pipeline_config import PipelineConfig, TTSConfig
+    from anytran.pipeline_config import PipelineConfig
     result = processing.process_audio_chunk(
-        audio_segment=audio_segment,
-        rate=16000,
-        config=PipelineConfig(
+        audio_segment,
+        16000,
+        PipelineConfig(
             input_lang="en",
             output_lang="fr",
             magnitude_threshold=0.001,
@@ -103,16 +103,14 @@ def test_scribe_and_slate_both_generated_during_translation(mock_translate_audio
             scribe_backend="auto",
             text_translation_target="fr",
             slate_backend="googletrans",
-        ),
-        tts_config=TTSConfig(
             voice_backend="gtts",
             voice_model=None,
             voice_lang=None,
         ),
+        stream_id=None,
+        timing_stats=None,
         scribe_tts_segments=scribe_tts_segments,
         slate_tts_segments=slate_tts_segments,
-        voice_match=False,
-        lang_prefix=False,
     )
     
     # Should have generated both scribe (English) and slate (French)
