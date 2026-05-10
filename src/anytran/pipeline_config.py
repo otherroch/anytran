@@ -11,10 +11,13 @@ Groups
 * **PipelineConfig** - All pipeline-wide settings (language, model, TTS,
   backends, timing, etc.).
 * **OutputConfig** - File paths for audio and text outputs.
+* **RunnerConfig** - Top-level bundle combining PipelineConfig, OutputConfig,
+  and MQTTConfig.  Runner functions accept this as a single argument instead
+  of ~30 individual keyword parameters.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -240,3 +243,50 @@ class StreamContext:
     slate_tts_segments: Optional[List] = None
     chat_logger: Optional[object] = None
     rtsp_ip: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Runner configuration (top-level bundle)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RunnerConfig:
+    """Top-level configuration bundle for runner functions.
+
+    Combines ``PipelineConfig``, ``OutputConfig``, and ``MQTTConfig`` into
+    a single parameter that replaces the ~30 individual keyword arguments
+    previously passed to each runner.
+
+    Parameters
+    ----------
+    pipeline : PipelineConfig
+        Pipeline-wide behavioural settings.
+    output : OutputConfig
+        File paths for audio and text outputs.
+    mqtt : MQTTConfig
+        MQTT broker connection and topic.
+    **extra : Any
+        Runner-specific parameters that don't fit the common pattern
+        (e.g. ``youtube_js_runtime``, ``output_device``, ``host``, ``port``).
+    """
+
+    pipeline: PipelineConfig
+    output: OutputConfig
+    mqtt: MQTTConfig
+    extra: dict = field(default_factory=dict)
+
+    # -- convenience forwards ------------------------------------------------
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Look up a key in ``extra``."""
+        return self.extra.get(key, default)
+
+    @property
+    def windows(self):
+        """Number of processing windows (convenience forward)."""
+        return self.pipeline.window_seconds
+
+    @property
+    def overlap(self):
+        """Overlap in seconds (convenience forward)."""
+        return self.pipeline.overlap_seconds

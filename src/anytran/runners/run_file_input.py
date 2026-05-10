@@ -1,569 +1,380 @@
-from anytran.audio_io import load_audio_any, output_audio
-from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
-from anytran.processing import build_output_prefix, process_audio_chunk
-from anytran.text_translator import translate_text, get_translategemma_model, get_metanllb_model
-from anytran.mqtt_client import init_mqtt, send_mqtt_text
-from anytran.normalizer import normalize_text, split_into_sentences
-from anytran.timing import TimingsAggregator, add_timing
-from anytran.tts import play_output, synthesize_tts_pcm
-from anytran.utils import compute_window_params
-import threading
-import numpy as np
-import signal
-import time
+"""File-input runner.
+
+Reads a local audio or text file, runs the translation pipeline,
+and writes output audio/text to disk.
+"""
+
 import os
-import librosa
- 
+import time
+
+import numpy as np
+
+from ..pipeline_config import RunnerConfig, StreamContext
+from ..stream_output import compute_window_params, normalize_text, output_audio
+
+
 def run_file_input(
-    input_path,
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    output_audio_path=None,
-    slate_audio_path=None,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    keep_temp=False,
-    dedup=False,
-    lang_prefix=False,
-    batch=0,
-    normalize=True,
-    slate_no_opt=False,
+    input_path: str,
+    cfg: RunnerConfig,
 ):
-    print("Starting file input processing...")
-    if keep_temp:
-        import builtins
-        builtins.__dict__["KEEP_TEMP"] = True
-    print(f"Input file: {input_path}")
-    print(f"Input language: {input_lang}, Output language: {output_lang}")
-    if output_audio_path:
-        print(f"Scribe audio (English) will be saved to: {output_audio_path}")
-    if slate_audio_path:
-        print(f"Slate audio (translated) will be saved to: {slate_audio_path}")
-    # output_text_file removed
-    if scribe_text_file:
-        print(f"Scribe text (English) will be saved to: {scribe_text_file}")
-    if slate_text_file:
-        print(f"Slate text (translated) will be saved to: {slate_text_file}")
-    if mqtt_broker:
-        print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}, topic: {mqtt_topic}")
+    """Run the pipeline on a local audio or text file.
 
-    if mqtt_broker:
-        init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
+    Parameters
+    ----------
+    input_path : str
+        Path to the input file (audio ``.wav``, ``.mp3``, etc. or text ``.txt``).
+    cfg : RunnerConfig
+        Combined runner configuration replacing ~30 individual keyword
+        parameters.
+    """
+    pipeline = cfg.pipeline
+    output = cfg.output
+    mqtt = cfg.mqtt
 
-    # Open file handles for all output files
-    # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
+    # -- output paths -------------------------
+    scribe_text_file = output.scribe_text_file
+    slate_text_file = output.slate_text_file
+    output_audio_path = output.output_audio_path
+    slate_audio_path = output.slate_audio_path
+    capture_voice_path = output.capture_voice_path
 
-    # Deduplication tracking for dual text output
-    last_scribe_output = None
-    last_slate_output = None
+    # -- pipeline settings --------------------
+    verbose = pipeline.verbose
+    timers_all = pipeline.timers_all
+    keep_temp = pipeline.keep_temp
+    input_lang = pipeline.input_lang
+    text_translation_target = pipeline.text_translation_target
+    slate_backend = pipeline.slate_backend
+    normalize = pipeline.normalize
+    dedup = pipeline.dedup
+    slate_no_opt = pipeline.slate_no_opt
 
-    timings = None
-    timing_stats = None
-    if timers_all:
-        # Ensure that enabling all timers also enables the basic timing flag
-        timers = True
-    if timers:
-        print("Timing enabled: Detailed stage timings will be printed after processing.")
-        timings = []
-        add_timing(timings, "total_start", time.perf_counter()) 
-        timing_stats = TimingsAggregator("file") 
-        # timing_stats.add(timings)
-    ext = os.path.splitext(input_path)[1].lower()
+    # -- stream context -----------------------
+    stream_ctx = StreamContext()
 
-    if ext == ".txt":
-        # if verbose:
-        # print("Processing text file input...")
-        if timings:
-          t0 = time.perf_counter()
-        try:
-            with open(input_path, mode="r", encoding="utf-8") as infile:
-                text = infile.read()
-        except Exception as exc:
-            print(f"Error reading input text file: {exc}")
-            return
-        if timings:
-          add_timing(timings, "read_file", t0)
-
-        if not text or not text.strip():
-            print("Error: Input text file is empty.")
-            return
-
-        stage1_text = text
-        direct_translation_done = False
-
-
-        if input_lang and input_lang.lower().split("-")[0] != "en":
-            input_base_check = input_lang.lower().split("-")[0]
-            target_base_check = text_translation_target.lower().split("-")[0] if text_translation_target else None
-            # Optimization: when target is a non-English language different from input, and no
-            # English output (scribe text/audio) is needed, translate directly input_lang → target_lang
-            # instead of the two-step input_lang → English → target_lang pivot.
-            # Disabled by slate_no_opt=True.
-            use_direct_translation = (
-                not slate_no_opt
-                and target_base_check
-                and target_base_check != "en"
-                and target_base_check != input_base_check
-                and scribe_text_file is None
-                and output_audio_path is None
-            )
-            stage1_target = text_translation_target if use_direct_translation else "en"
-            if verbose:
-                if use_direct_translation:
-                    print(
-                        f"Translating input text directly to {text_translation_target} "
-                        f"(skipping English intermediate step)."
-                    )
-                else:
-                    print("Translating input text to English for Stage 1...split into sentences for better translation quality.")       
-            # Chunk the text into sentences for more reliable translation
-            if timings:
-               t1 = time.perf_counter()            
-            sentences = split_into_sentences(text)
-            translated_sentences = []
-            if timings:
-                add_timing(timings, "split_text", t1)                  
-                t2 = time.perf_counter() 
-            if verbose:
-                print("batch size:", batch)
-            if slate_backend == "translategemma": 
-                get_translategemma_model()  # Preload model before timing translation
-            #elif slate_backend == "metanllb":
-            #    get_metanllb_model()  # Preload model and tokenizer before timing translation
-            if batch > 0:
-                    num_sentences = len(sentences)
-                    for i in range(0, num_sentences, batch):
-                        batch_group = sentences[i:i+batch]
-                        batch_start = i + 1
-                        batch_end = i + len(batch_group)
-                        batch_text = ' '.join(batch_group)
-                        if verbose:
-                            print(f"Batching sentences {batch_start}-{batch_end} for translation, total length: {len(batch_text)}")
-                        translated = translate_text(
-                            batch_text,
-                            source_lang=input_lang,
-                            target_lang=stage1_target,
-                            backend=slate_backend,
-                            verbose=verbose,
-                        )
-                        if not translated:
-                            print(f"Error: Failed to batch translate sentences {batch_start}-{batch_end}.")
-                            translated_sentences.extend(batch_group)
-                        else:
-                            # Split translated batch into sentences
-                            batch_translated = split_into_sentences(translated)
-                            batch_translated_sentence_count = len(batch_translated) 
-                            if verbose:
-                                print(f"Batch translated text length: {len(translated)}")
-                                print(f"Batch translated num sentences before splitting: {batch_translated_sentence_count}")    
-                            if batch_translated_sentence_count == 0:
-                                if translated.strip():
-                                    translated_sentences.append(translated.strip())
-                            else:
-                                for sentence in batch_translated:
-                                    if sentence.strip():
-                                        translated_sentences.append(sentence.strip())
-                            if verbose:
-                                print(f"translated sentences after splitting: {len(translated_sentences)}")
-                    english_text = ' '.join(translated_sentences)
-                    if verbose:
-                        print(f"Total translated text length after batching: {len(english_text)}")
-            else:
-                for idx, sent in enumerate(sentences):
-                    if verbose:
-                        print(f"Translating sentence {idx+1}/{len(sentences)}: {sent}")
-                    translated = translate_text(
-                        sent,
-                        source_lang=input_lang,
-                        target_lang=stage1_target,
-                        backend=slate_backend,
-                        verbose=verbose,
-                    )
-                    if not translated:
-                        print(f"Error: Failed to translate sentence {idx+1}: {sent}")
-                        continue
-                    if verbose:
-                        print(f"Translated sentence {idx+1}: {translated}") 
-                    translated_sentences.append(translated)
-                english_text = ' '.join(translated_sentences)
-            if verbose:
-                if use_direct_translation:
-                    print(f"Direct translation ({input_lang} → {text_translation_target}) len: {len(english_text)}")
-                else:
-                    print(f"Stage 1 (Text -> English) len: {len(english_text)}")
-
-            if timings:
-               add_timing(timings, "stage2_translation", t2)
-            if use_direct_translation:
-                direct_translation_done = True
-
-        # Write Stage 1 text to scribe file (English when applicable), prefixing each sentence
-        if scribe_file and english_text:
-            if timings:
-                t3 = time.perf_counter()
-            sentences = split_into_sentences(english_text)
-            if verbose:
-                print(f"Writing {len(sentences)} sentences to scribe file...")   
-            for sent in sentences:
-                if lang_prefix: 
-                    scribe_output = f"{build_output_prefix(detected_lang='en')}{sent}" 
-                else:
-                    scribe_output = sent
-                if normalize:
-                    scribe_output = normalize_text(scribe_output)
-                scribe_file.write(f"{scribe_output}\n")
-            scribe_file.flush()
-
-            if timings:
-                add_timing(timings, "write_scribe_file", t3)
-
-        if direct_translation_done:
-            final_text = english_text
-            final_lang = text_translation_target
-            stage2_ran = True
-        else:
-            final_text = english_text
-            final_lang = "en"
-            stage2_ran = False
-        if not direct_translation_done and text_translation_target and text_translation_target.lower().split("-")[0] != "en":
-            if timings:
-                t6 = time.perf_counter()
-            # Optimization: if the input is already in the target language, skip
-            # the round-trip translation (input_lang → English → input_lang) and
-            # use the original text directly as the slate output.
-            # This can be disabled with slate_no_opt=True.
-            input_base = input_lang.lower().split("-")[0] if input_lang else None
-            target_base = text_translation_target.lower().split("-")[0]
-            if not slate_no_opt and input_base and input_base == target_base:
-                if verbose:
-                    print(
-                        f"Input language matches target language ({text_translation_target}), "
-                        "skipping Stage 2 translation and using original text directly."
-                    )
-                if timings:
-                    add_timing(timings, "stage2_translation", t6)
-                final_text = text
-                final_lang = text_translation_target
-                stage2_ran = True
-            else:
-                if verbose:
-                    print(f"Translating text from English to {text_translation_target} for Stage 2...")
-                if batch > 0:
-                    # Split English text into sentences for Stage 2 batching
-                    sentences = split_into_sentences(english_text)
-                    translated_sentences = []
-                    for i in range(0, len(sentences), batch):
-                        batch_group = sentences[i:i+batch]
-                        batch_text = ' '.join(batch_group)
-                        if verbose:
-                            print(f"Batching sentences {i+1}-{i+len(batch_group)} for translation, total length: {len(batch_text)}")
-                        translated = translate_text(
-                            batch_text,
-                            source_lang="en",
-                            target_lang=text_translation_target,
-                            backend=slate_backend,
-                            verbose=verbose,
-                        )
-                        if not translated:
-                            print(f"Error: Failed to batch translate sentences {i+1}-{i+len(batch_group)}.")
-                            translated_sentences.extend(batch_group)
-                        else:
-                            # Split translated batch into sentences
-                            batch_translated = split_into_sentences(translated)
-                            for sentence in batch_translated:
-                                if sentence.strip():
-                                    translated_sentences.append(sentence.strip())
-                    translated = ' '.join(translated_sentences)
-                else:
-                    # Split English text into sentences for Stage 2 if not batching
-                    sentences = split_into_sentences(english_text)
-                    translated_sentences = []
-                    for idx, sent in enumerate(sentences):
-                        translated_sent = translate_text(
-                            sent,
-                            source_lang="en",
-                            target_lang=text_translation_target,
-                            backend=slate_backend,
-                            verbose=verbose,
-                        )
-                        if not translated_sent:
-                            print(f"Error: Failed to translate sentence {idx+1}: {sent}")
-                            continue
-                        translated_sentences.append(translated_sent)
-                    translated = ' '.join(translated_sentences)
-
-                if timings:
-                    add_timing(timings, "stage2_translation", t6)
-
-                if translated:
-                    final_text = translated
-                    final_lang = text_translation_target
-                    stage2_ran = True
-                    if verbose:
-                        print(f"Stage 2 (English -> {text_translation_target}) len: {len(final_text)}")
-
-        
-        # Write to slate file if provided, but avoid duplicating unchanged English text
-        if slate_file and final_text:
-            if verbose:
-                print(f"Writing translated text to slate file...")
-            if timings:
-                t8 = time.perf_counter()
-            if lang_prefix:
-                slate_output = f"{build_output_prefix(detected_lang=final_lang)}{final_text.strip()}"
-            else:
-                slate_output = final_text.strip()
-            if normalize:
-                slate_output = normalize_text(slate_output)
-            slate_file.write(f"{slate_output}\n")
-            slate_file.flush()
-            if timings:
-               add_timing(timings, "write_slate_file", t8)
-
-        if not final_text:
-            print("Error: No output text generated from input file.")
-            return
-
-        if lang_prefix:  
-           output_text = f"{build_output_prefix(detected_lang=final_lang)}{final_text.strip()}" 
-        else: 
-            output_text = final_text.strip()
-        # output_text_file removed
-
-        if mqtt_broker:
-            send_mqtt_text(output_text, mqtt_topic, mqtt_broker, mqtt_port, mqtt_username, mqtt_password)
-
-        # Stage 1 audio (English scribe voice)
-        if output_audio_path and english_text:
-            if timings:
-                t12 = time.perf_counter()   
-            tts_lang = voice_lang or "en"
-            tts_pcm = synthesize_tts_pcm(
-                english_text,
-                16000,
-                tts_lang,
-                voice_backend=voice_backend,
-                voice_model=voice_model,
-                verbose=verbose,
-            )
-            if tts_pcm is not None:
-                try:
-                    output_audio(tts_pcm, output_audio_path, play=False)
-                    print(f"Scribe audio file saved: {output_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving scribe audio file: {exc}", flush=True)
-            if timings:
-                add_timing(timings, "stage3_synthesis", t12)  
-
-        # Stage 2 audio (translated slate voice) - only if translation occurred
-        if slate_audio_path and stage2_ran and final_text:
-            if timings:
-                t14 = time.perf_counter()   
-            tts_lang = voice_lang or text_translation_target or output_lang or "en"
-            tts_pcm = synthesize_tts_pcm(
-                final_text,
-                16000,
-                tts_lang,
-                voice_backend=voice_backend,
-                voice_model=voice_model,
-                verbose=verbose,
-            )
-            if tts_pcm is not None:
-                try:
-                    output_audio(tts_pcm, slate_audio_path, play=False)
-                    print(f"Slate audio file saved: {slate_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving slate audio file: {exc}", flush=True)
-            if timings:
-                add_timing(timings, "stage3_synthesis", t14)
-
-        # play_audio removed
-        if timings:
-            timing_stats.add(timings, "chunk")
-            if timers_all:
-                summary = timing_stats.format_summary()
-                if summary:
-                    print(f"\nTiming summary (file):\n{summary}")
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (file):\n{stage_summary}")
-                overhead = timing_stats.format_translate_overhead('chunk')
-                if overhead:
-                    print(f"\nTiming translate overhead (file):\n{overhead}")
-            elif timings:
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (file):\n{stage_summary}")
-                    
-        if scribe_file: 
-            scribe_file.close()
-        if slate_file:
-            slate_file.close()
-            
-        return # Exit after processing text file, since we don't have audio to chunk/process
-
-    try:
-        audio, rate = load_audio_any(input_path)
-    except Exception as exc:
-        print(f"Error loading input audio file: {exc}")
-        return
-
-    if audio is None:
-        print("Error: Failed to load audio data from input file.")
-        return
-
-    audio = np.asarray(audio)
-    if audio.ndim > 1:
-        audio = audio[:, 0]
-    if not np.issubdtype(audio.dtype, np.floating):
-        audio = audio.astype(np.float32) / 32768.0
+    # -- load input ---------------------------
+    if input_path.lower().endswith(".txt"):
+        _run_file_input_text(
+            input_path,
+            scribe_text_file=scribe_text_file,
+            slate_text_file=slate_text_file,
+            output_audio_path=output_audio_path,
+            slate_audio_path=slate_audio_path,
+            input_lang=input_lang,
+            text_translation_target=text_translation_target,
+            slate_backend=slate_backend,
+            normalize=normalize,
+            dedup=dedup,
+            slate_no_opt=slate_no_opt,
+            timers_all=timers_all,
+            verbose=verbose,
+            stream_ctx=stream_ctx,
+        )
     else:
-        audio = audio.astype(np.float32)
+        _run_file_input_audio(
+            input_path,
+            scribe_text_file=scribe_text_file,
+            slate_text_file=slate_text_file,
+            output_audio_path=output_audio_path,
+            slate_audio_path=slate_audio_path,
+            capture_voice_path=capture_voice_path,
+            windows=pipeline.window_seconds,
+            overlap=pipeline.overlap_seconds,
+            rate=None,
+            scribe_vad=pipeline.scribe_vad,
+            magnitude_threshold=pipeline.magnitude_threshold,
+            input_lang=input_lang,
+            text_translation_target=text_translation_target,
+            scribe_backend=pipeline.scribe_backend,
+            slate_backend=slate_backend,
+            voice_backend=pipeline.voice_backend,
+            voice_model=pipeline.voice_model,
+            voice_lang=pipeline.voice_lang,
+            voice_match=pipeline.voice_match,
+            lang_prefix=pipeline.lang_prefix,
+            normalize=normalize,
+            dedup=dedup,
+            slate_no_opt=slate_no_opt,
+            keep_temp=keep_temp,
+            timers_all=timers_all,
+            verbose=verbose,
+            stream_ctx=stream_ctx,
+            mqtt_cfg=None,
+        )
 
-    if rate != 16000:
-        try:
-            audio = librosa.resample(audio, orig_sr=rate, target_sr=16000)
-            if verbose:
-                print(f"Resampled audio from {rate} Hz to 16000 Hz")
-            rate = 16000
-        except Exception as exc:
-            print(f"Error resampling audio: {exc}")
-            return
 
-    audio_segments = [] if output_audio_path else None
-    slate_audio_segments = [] if slate_audio_path else None
-    if timings:
-        ta0 = time.perf_counter()
-    chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
-    step = max(1, chunk - overlap)
-    try:
-        for start in range(0, len(audio), step):
-            audio_segment = audio[start : start + chunk]
-            if audio_segment.size == 0:
-                break
-            # Build config objects once per chunk iteration
-            pipeline_cfg = PipelineConfig(
-                input_lang=input_lang,
-                output_lang=output_lang,
-                magnitude_threshold=magnitude_threshold,
-                model=model,
-                verbose=verbose,
-                scribe_vad=scribe_vad,
-                voice_backend=voice_backend,
-                voice_model=voice_model,
-                timers=timers,
-                scribe_backend=scribe_backend,
-                text_translation_target=text_translation_target,
-                slate_backend=slate_backend,
-                voice_lang=voice_lang,
-                voice_match=voice_match,
-                lang_prefix=lang_prefix,
-            )
-            mqtt_cfg = MQTTConfig(
-                broker=mqtt_broker,
-                port=mqtt_port,
-                username=mqtt_username,
-                password=mqtt_password,
-                topic=mqtt_topic,
-            ) if mqtt_broker else None
+# -------  Text-input helper  --------------------------------------------------
 
-            stream_ctx = StreamContext(
-                stream_id="file",
-                timing_stats=timing_stats,
-                scribe_tts_segments=audio_segments,
-                slate_tts_segments=slate_audio_segments,
-            )
+def _run_file_input_text(
+    input_path,
+    scribe_text_file,
+    slate_text_file,
+    output_audio_path,
+    slate_audio_path,
+    input_lang,
+    text_translation_target,
+    slate_backend,
+    normalize,
+    dedup,
+    slate_no_opt,
+    timers_all,
+    verbose,
+    stream_ctx,
+):
+    from ..text_translator import split_into_sentences, translate_text
+    from ..tts import synthesize_tts_pcm
 
-            result = process_audio_chunk(
-                audio_segment,
-                rate,
-                pipeline_cfg,
-                stream_ctx,
-                mqtt_cfg,
-            )
+    with open(input_path, "r", encoding="utf-8") as f:
+        text = f.read()
 
-            # Deduplication: Write outputs only if different from last ones
-            if result:
-                scribe_output = result.get('scribe')
-                slate_output = result.get('slate')
+    if normalize:
+        text = normalize_text(text)
 
-                if scribe_output and scribe_output != last_scribe_output:
-                    if scribe_file:
-                        if normalize:
-                            scribe_output = normalize_text(scribe_output)
-                        scribe_file.write(f"{scribe_output}\n")
-                        scribe_file.flush()
-                    last_scribe_output = scribe_output
+    # -- Determine if we need English (scribe) output -------------------------
+    need_scribe = output_audio_path is not None or scribe_text_file is not None
 
-                if slate_output and slate_output != last_slate_output:
-                    if slate_file:
-                        if normalize:
-                            slate_output = normalize_text(slate_output)
-                        slate_file.write(f"{slate_output}\n")
-                        slate_file.flush()
-                    last_slate_output = slate_output
-    finally:
-        # output_text_file removed
-        if scribe_file:
-            scribe_file.close()
-            print(f"Scribe text file saved: {scribe_text_file}", flush=True)
-        if slate_file:
-            slate_file.close()
-            print(f"Slate text file saved: {slate_text_file}", flush=True)
-        if audio_segments is not None:
-            if len(audio_segments) > 0:
-                all_audio = np.concatenate(audio_segments)
-                try:
-                    output_audio(all_audio, output_audio_path, play=False)
-                    print(f"Output audio file saved: {output_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving output audio file: {exc}", flush=True)
-        if slate_audio_segments is not None:
-            if len(slate_audio_segments) > 0:
-                all_slate_audio = np.concatenate(slate_audio_segments)
-                try:
-                    output_audio(all_slate_audio, slate_audio_path, play=False)
-                    print(f"Slate audio file saved: {slate_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving slate audio file: {exc}", flush=True)
-        if timings:
-            add_timing(timings, "stage1_transcription", ta0)
-            timing_stats.add(timings, "chunk")
+    # -- Determine if target == input (skip Stage 2) -------------------------
+    skip_stage2 = False
+    if not slate_no_opt and input_lang and text_translation_target:
+        input_base = input_lang.split("-")[0]
+        target_base = text_translation_target.split("-")[0]
+        if input_base == target_base:
+            skip_stage2 = True
+
+    # -- Determine if direct translation is possible (non-EN to non-EN) ------
+    use_direct = False
+    if not slate_no_opt and input_lang and text_translation_target:
+        if input_lang.lower() != "en" and text_translation_target.lower() != "en":
+            if not need_scribe:
+                use_direct = True
+
+    if use_direct:
+        # Direct translation: input_lang -> target (no English pivot)
+        sentences = split_into_sentences(text)
+        translated = []
+        for sentence in sentences:
             if timers_all:
-                summary = timing_stats.format_summary()
-                if summary:
-                    print(f"\nTiming summary (file):\n{summary}")
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (file):\n{stage_summary}")
-                overhead = timing_stats.format_translate_overhead('chunk')
-                if overhead:
-                    print(f"\nTiming translate overhead (file):\n{overhead}")
-            elif timings:
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (file):\n{stage_summary}")
+                t0 = time.time()
+            result = translate_text(
+                sentence,
+                source_lang=input_lang,
+                target_lang=text_translation_target,
+                backend=slate_backend,
+                verbose=verbose,
+            )
+            if timers_all:
+                elapsed = time.time() - t0
+                print(f"[TIMER] Stage 2 translate: {elapsed:.3f}s")
+            translated.append(result)
+        slate_text = "\n".join(translated)
+    else:
+        # Stage 1: translate to English (if input not already English)
+        if input_lang and input_lang.lower() != "en":
+            sentences = split_into_sentences(text)
+            english_parts = []
+            for sentence in sentences:
+                if timers_all:
+                    t0 = time.time()
+                result = translate_text(
+                    sentence,
+                    source_lang=input_lang,
+                    target_lang="en",
+                    backend=slate_backend,
+                    verbose=verbose,
+                )
+                if timers_all:
+                    elapsed = time.time() - t0
+                    print(f"[TIMER] Stage 1 translate: {elapsed:.3f}s")
+                english_parts.append(result)
+            english_text = "\n".join(english_parts)
+        else:
+            english_text = text
+
+        # Write scribe (English) text
+        if scribe_text_file:
+            with open(scribe_text_file, "w", encoding="utf-8") as f:
+                f.write(english_text.upper() if normalize else english_text)
+                f.write("\n")
+
+        # Stage 2: translate English -> target
+        if not skip_stage2 and text_translation_target:
+            sentences = split_into_sentences(english_text)
+            translated = []
+            for sentence in sentences:
+                if timers_all:
+                    t0 = time.time()
+                result = translate_text(
+                    sentence,
+                    source_lang="en",
+                    target_lang=text_translation_target,
+                    backend=slate_backend,
+                    verbose=verbose,
+                )
+                if timers_all:
+                    elapsed = time.time() - t0
+                    print(f"[TIMER] Stage 2 translate: {elapsed:.3f}s")
+                translated.append(result)
+            slate_text = "\n".join(translated)
+        else:
+            slate_text = text  # use original input text
+
+        # Write slate text
+        if slate_text_file:
+            with open(slate_text_file, "w", encoding="utf-8") as f:
+                f.write(slate_text)
+                f.write("\n")
+
+    # -- Scribe TTS -----------------------------------------------------------------------
+    if output_audio_path:
+        tts_lang = "en"
+        if stream_ctx.scribe_tts_segments is None:
+            stream_ctx.scribe_tts_segments = []
+        pcm = synthesize_tts_pcm(
+            english_text,
+            16000,
+            tts_lang,
+        )
+        if pcm is not None:
+            stream_ctx.scribe_tts_segments.append(pcm)
+
+    # -- Slate TTS ------------------------------------------------------------------------
+    if slate_audio_path:
+        tts_lang = text_translation_target if text_translation_target else "en"
+        if stream_ctx.slate_tts_segments is None:
+            stream_ctx.slate_tts_segments = []
+        pcm = synthesize_tts_pcm(
+            slate_text,
+            16000,
+            tts_lang,
+        )
+        if pcm is not None:
+            stream_ctx.slate_tts_segments.append(pcm)
+
+    # -- Write accumulated audio ----------------------------------------------------------
+    if stream_ctx.scribe_tts_segments:
+        _write_accumulated_audio(stream_ctx.scribe_tts_segments, output_audio_path)
+    if stream_ctx.slate_tts_segments:
+        _write_accumulated_audio(stream_ctx.slate_tts_segments, slate_audio_path)
+
+
+def _write_accumulated_audio(segments, path):
+    if not segments:
+        return
+    audio_data = np.concatenate(segments, axis=0)
+    output_audio(audio_data, path)
+
+
+# -------  Audio-input helper  -------------------------------------------------
+
+def _run_file_input_audio(
+    input_path,
+    scribe_text_file,
+    slate_text_file,
+    output_audio_path,
+    slate_audio_path,
+    capture_voice_path,
+    windows,
+    overlap,
+    rate,
+    scribe_vad,
+    magnitude_threshold,
+    input_lang,
+    text_translation_target,
+    scribe_backend,
+    slate_backend,
+    voice_backend,
+    voice_model,
+    voice_lang,
+    voice_match,
+    lang_prefix,
+    normalize,
+    dedup,
+    slate_no_opt,
+    keep_temp,
+    timers_all,
+    verbose,
+    stream_ctx,
+    mqtt_cfg,
+):
+    from ..stream_output import (
+        load_audio_any,
+        process_audio_chunk,
+    )
+
+    # -- load audio file -----------------------------------------------------------
+    audio_data, sample_rate = load_audio_any(input_path, keep_temp=keep_temp)
+
+    if rate is not None:
+        sample_rate = rate
+
+    # -- compute window/step -------------------------------------------------------
+    frame_count = len(audio_data)
+
+    window_size, hop_size = compute_window_params(
+        sample_rate,
+        window_seconds=windows,
+        overlap_seconds=overlap,
+    )
+
+    # -- silence-detection parameters ------------------------------------------
+    mag_threshold = magnitude_threshold
+
+    last_scribe_text = None
+    last_slate_text = None
+
+    # -- capture-voice accumulator -------------------------------------------------
+    capture_chunks = [] if capture_voice_path else None
+
+    # -- process windows -----------------------------------------------------------
+    for start_frame in range(0, frame_count, hop_size):
+        end_frame = min(start_frame + window_size, frame_count)
+        chunk = audio_data[start_frame:end_frame]
+
+        # -- silence gate (when no VAD) ------------------------------------------------
+        if not scribe_vad:
+            max_abs = np.max(np.abs(chunk))
+            if max_abs < mag_threshold:
+                continue
+
+        result = process_audio_chunk(
+            chunk,
+            sample_rate,
+            pipeline_cfg=None,
+            stream_ctx=stream_ctx,
+            mqtt_cfg=mqtt_cfg,
+        )
+
+        scribe_text = result.get("scribe")
+        slate_text = result.get("slate")
+
+        # -- deduplicate consecutive outputs ------------------------------------------
+        if dedup:
+            if scribe_text == last_scribe_text:
+                scribe_text = None
+            if slate_text == last_slate_text:
+                slate_text = None
+            last_scribe_text = result.get("scribe")
+            last_slate_text = result.get("slate")
+
+        # -- write text to files (when produced) ---------------------------------------
+        if scribe_text and scribe_text_file:
+            with open(scribe_text_file, "a", encoding="utf-8") as f:
+                f.write(scribe_text + "\n")
+        if slate_text and slate_text_file:
+            with open(slate_text_file, "a", encoding="utf-8") as f:
+                f.write(slate_text + "\n")
+
+        # -- accumulate capture-voice chunks ------------------------------------------
+        if capture_chunks is not None:
+            capture_chunks.append(chunk)
+
+    # -- write capture-voice file ---------------------------------------------------
+    if capture_chunks:
+        capture_audio = np.concatenate(capture_chunks, axis=0)
+        output_audio(capture_audio, capture_voice_path)
+
+    # -- write accumulated TTS audio ------------------------------------------------
+    if stream_ctx.scribe_tts_segments and output_audio_path:
+        _write_accumulated_audio(stream_ctx.scribe_tts_segments, output_audio_path)
+    if stream_ctx.slate_tts_segments and slate_audio_path:
+        _write_accumulated_audio(stream_ctx.slate_tts_segments, slate_audio_path)

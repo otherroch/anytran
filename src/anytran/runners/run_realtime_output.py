@@ -1,253 +1,223 @@
-from anytran.stream_output import get_wasapi_loopback_device_info, stream_output_audio
-from anytran.audio_io import output_audio
-from anytran.normalizer import normalize_text
-from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
-from anytran.processing import process_audio_chunk
-from anytran.mqtt_client import init_mqtt
-from anytran.timing import TimingsAggregator
-from anytran.utils import compute_window_params
-import threading
-import numpy as np
+"""Realtime-output runner (Windows WASAPI loopback capture).
+
+Captures system audio on Windows and streams it through the translation pipeline.
+"""
+
 import signal
 import sys
-from queue import Queue, Empty
+import threading
+import time
+
+import numpy as np
+
+from ..pipeline_config import MQTTConfig, PipelineConfig, OutputConfig, RunnerConfig, StreamContext
+from ..stream_output import (
+    compute_window_params,
+    init_mqtt,
+    normalize_text,
+    output_audio,
+)
+
 
 def run_realtime_output(
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    output_audio_path=None,
-    slate_audio_path=None,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    output_device=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    dedup=False,
-    lang_prefix=False,
-    normalize=True,
-    capture_voice_path=None,
+    cfg: RunnerConfig,
 ):
-    print("Starting real-time system output audio translation. ..")
-    print(f"Input language: {input_lang}, Output language: {output_lang}")
-    if output_audio_path:
-        print(f"Output audio will be saved to: {output_audio_path}")
-    # output_text_file removed
-    if scribe_text_file:
-        print(f"Stage 1 (English) text will be saved to: {scribe_text_file}")
-    if slate_text_file:
-        print(f"Stage 2 (translated) text will be saved to: {slate_text_file}")
-    if capture_voice_path:
-        print(f"Original input voice will be saved to: {capture_voice_path}")
-    if mqtt_broker:
-        print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}, topic: {mqtt_topic}")
-    print("Press Ctrl+C to stop.")
+    """Run the pipeline on Windows WASAPI loopback audio.
 
+    Parameters
+    ----------
+    cfg : RunnerConfig
+        Combined runner configuration.  Runner-specific extras:
+        * ``output_device`` : str or None  - WASAPI device id override.
+    """
+    pipeline = cfg.pipeline
+    output = cfg.output
+    mqtt = cfg.mqtt
+
+    # -- Windows-only -------------------------
     if sys.platform != "win32":
-        print("System output capture is only supported on Windows (WASAPI loopback).")
+        print("Realtime output is only supported on Windows.")
         return
 
-    device_info = get_wasapi_loopback_device_info(preferred_name=output_device, verbose=verbose)
-    if not device_info:
-        print("No WASAPI loopback device found. Unable to capture system output.")
+    verbose = pipeline.verbose
+    normalize = pipeline.normalize
+    dedup = pipeline.dedup
+    scribe_vad = pipeline.scribe_vad
+    magnitude_threshold = pipeline.magnitude_threshold
+
+    # -- output paths -------------------------
+    scribe_text_file = output.scribe_text_file
+    slate_text_file = output.slate_text_file
+    output_audio_path = output.output_audio_path
+    slate_audio_path = output.slate_audio_path
+    capture_voice_path = output.capture_voice_path
+
+    # -- mqtt -------------------------
+    topic = mqtt.topic if mqtt.is_enabled else None
+    _ = mqtt
+
+    # -- stream context -----------------------
+    stream_ctx = StreamContext()
+
+    # -- get device -------------------------
+    device_info = _get_wasapi_loopback_device_info(cfg.get("output_device"))
+    if device_info is None:
+        print("Could not find a WASAPI loopback device.")
         return
+
+    sample_rate = device_info.get("sample_rate", 48000)
+    channels = device_info.get("channels", 1)
+
+    # -- compute window/step -------------------------
+    window_size, hop_size = compute_window_params(
+        sample_rate,
+        window_seconds=pipeline.window_seconds,
+        overlap_seconds=pipeline.overlap_seconds,
+    )
+
+    # -- silence-detection parameters -------------------------
+    mag_threshold = magnitude_threshold
+
+    last_scribe_text = None
+    last_slate_text = None
+
+    # -- capture-voice accumulator -------------------------
+    capture_chunks = [] if capture_voice_path else None
+
+    # -- mqtt init -------------------------
+    if mqtt.is_enabled:
+        mqtt_client = init_mqtt(
+            broker=mqtt.broker,
+            port=mqtt.port,
+            username=mqtt.username,
+            password=mqtt.password,
+            topic=topic,
+        )
+    else:
+        mqtt_client = None
+
+    # -- audio queue -------------------------
+    audio_queue = _start_wasapi_capture(device_info, sample_rate, channels)
 
     stop_flag = threading.Event()
-
-    def signal_handler(sig, frame):
-        print("\nStopping...", flush=True)
-        stop_flag.set()
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    if mqtt_broker:
-        init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
-
-    if timers_all:
-        timers = True  # timers_all implies timers      
-    timing_stats = TimingsAggregator("output") if timers else None
- 
-    audio_queue = Queue(maxsize=5)
-    buffer = np.array([], dtype=np.float32)
-    # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
-    scribe_audio_segments = [] if output_audio_path else None
-    slate_audio_segments = [] if slate_audio_path else None
-    capture_voice_segments = [] if capture_voice_path else None
-
-    # Deduplication tracking for dual text output
-
-    recent_slate_outputs = []
-    recent_scribe_outputs = []
-    dedup_window_size = 10  # Check last 10 outputs
-
-    stream_thread = threading.Thread(
-        target=stream_output_audio,
-        args=(audio_queue, device_info, 16000, stop_flag, verbose),
-        daemon=True,
-    )
-    stream_thread.start()
-
-    rate = 16000
-    chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
 
     try:
         while not stop_flag.is_set():
             try:
-                audio_chunk = audio_queue.get(timeout=1)
-                if capture_voice_segments is not None:
-                    capture_voice_segments.append(audio_chunk.copy())
-                buffer = np.concatenate([buffer, audio_chunk])
-                if len(buffer) >= chunk:
-                    audio_segment = buffer[:chunk]
-                    buffer = buffer[chunk - overlap :]
-                    pipeline_cfg = PipelineConfig(
-                        input_lang=input_lang,
-                        output_lang=output_lang,
-                        magnitude_threshold=magnitude_threshold,
-                        model=model,
-                        verbose=verbose,
-                        scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
-                        voice_model=voice_model,
-                        timers=timers,
-                        scribe_backend=scribe_backend,
-                        text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
-                    )
-                    mqtt_cfg = MQTTConfig(
-                        broker=mqtt_broker,
-                        port=mqtt_port,
-                        username=mqtt_username,
-                        password=mqtt_password,
-                        topic=mqtt_topic,
-                    ) if mqtt_broker else None
-
-                    stream_ctx = StreamContext(
-                        stream_id="output",
-                        timing_stats=timing_stats,
-                        scribe_tts_segments=scribe_audio_segments,
-                        slate_tts_segments=slate_audio_segments,
-                    )
-
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        pipeline_cfg,
-                        stream_ctx,
-                        mqtt_cfg,
-                    )
-                    
-                    # Deduplication: Write outputs only if not in recent window
-                    if result:
-                        scribe_output = result.get('scribe')
-                        slate_output = result.get('slate')
-
-                        if dedup:
-                            if scribe_output and scribe_output not in recent_scribe_outputs:
-                                if scribe_file:
-                                    if normalize:
-                                        scribe_output = normalize_text(scribe_output)
-                                    scribe_file.write(f"{scribe_output}\n")
-                                    scribe_file.flush()
-                                recent_scribe_outputs.append(scribe_output)
-                                if len(recent_scribe_outputs) > dedup_window_size:
-                                    recent_scribe_outputs.pop(0)
-
-                            if slate_output and slate_output not in recent_slate_outputs:
-                                if slate_file:
-                                    if normalize:
-                                        slate_output = normalize_text(slate_output)
-                                    slate_file.write(f"{slate_output}\n")
-                                    slate_file.flush()
-                                recent_slate_outputs.append(slate_output)
-                                if len(recent_slate_outputs) > dedup_window_size:
-                                    recent_slate_outputs.pop(0)
-                        else:
-                            # When deduplication is disabled, write outputs directly
-                            if scribe_output and scribe_file:
-                                if normalize:
-                                    scribe_output = normalize_text(scribe_output)
-                                scribe_file.write(f"{scribe_output}\n")
-                                scribe_file.flush()
-                            if slate_output and slate_file:
-                                if normalize:
-                                    slate_output = normalize_text(slate_output)
-                                slate_file.write(f"{slate_output}\n")
-                                slate_file.flush()
-            except Empty:
-                if stop_flag.is_set():
-                    break
+                chunk = audio_queue.get(timeout=0.5)
+            except Exception:
                 continue
+
+            # -- down-mix to mono -------------------------
+            if channels > 1:
+                chunk = np.mean(chunk.reshape(-1, channels), axis=1)
+
+            # -- silence gate -------------------------
+            if not scribe_vad:
+                max_abs = np.max(np.abs(chunk))
+                if max_abs < mag_threshold:
+                    continue
+
+            result = _process_chunk(
+                chunk,
+                sample_rate,
+                pipeline,
+                stream_ctx,
+                mqtt_client,
+            )
+
+            scribe_text = result.get("scribe")
+            slate_text = result.get("slate")
+
+            # -- dedup -------------------------
+            if dedup:
+                if scribe_text == last_scribe_text:
+                    scribe_text = None
+                if slate_text == last_slate_text:
+                    slate_text = None
+                last_scribe_text = result.get("scribe")
+                last_slate_text = result.get("slate")
+
+            # -- write text to files -------------------------
+            if scribe_text and scribe_text_file:
+                with open(scribe_text_file, "a", encoding="utf-8") as f:
+                    f.write(scribe_text + "\n")
+            if slate_text and slate_text_file:
+                with open(slate_text_file, "a", encoding="utf-8") as f:
+                    f.write(slate_text + "\n")
+
+            # -- accumulate capture-voice chunks -------------------------
+            if capture_chunks is not None:
+                capture_chunks.append(chunk)
+
     except KeyboardInterrupt:
-        print("\nStopped.", flush=True)
         stop_flag.set()
     finally:
-        if scribe_file:
-            scribe_file.close()
-            print(f"Stage 1 (English) text file saved: {scribe_text_file}", flush=True)
-        if slate_file:
-            slate_file.close()
-            print(f"Stage 2 (translated) text file saved: {slate_text_file}", flush=True)
-        if scribe_audio_segments is not None:
-            if len(scribe_audio_segments) > 0:
-                all_audio = np.concatenate(scribe_audio_segments)
-                try:
-                    output_audio(all_audio, output_audio_path, play=False)
-                    print(f"Scribe audio file saved: {output_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving scribe audio file: {exc}", flush=True)
-        if slate_audio_segments is not None:
-            if len(slate_audio_segments) > 0:
-                all_audio = np.concatenate(slate_audio_segments)
-                try:
-                    output_audio(all_audio, slate_audio_path, play=False)
-                    print(f"Slate audio file saved: {slate_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving slate audio file: {exc}", flush=True)
-        if capture_voice_segments is not None:
-            if len(capture_voice_segments) > 0:
-                all_audio = np.concatenate(capture_voice_segments)
-                try:
-                    output_audio(all_audio, capture_voice_path, play=False)
-                    print(f"Captured input voice saved: {capture_voice_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving captured input voice: {exc}", flush=True)
-        if timing_stats is not None:
-            if timers_all:
-                summary = timing_stats.format_summary()
-                if summary:
-                    print(f"\nTiming summary (output):\n{summary}")
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (output):\n{stage_summary}")
-                overhead = timing_stats.format_translate_overhead('chunk')
-                if overhead:
-                    print(f"\nTiming translate overhead (output):\n{overhead}")
-            elif timers:
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (output):\n{stage_summary}")
+        # -- write capture-voice file -------------------------
+        if capture_chunks:
+            capture_audio = np.concatenate(capture_chunks, axis=0)
+            output_audio(capture_audio, capture_voice_path)
+
+        # -- write accumulated TTS audio -------------------------
+        if stream_ctx.scribe_tts_segments and output_audio_path:
+            _write_accumulated_audio(stream_ctx.scribe_tts_segments, output_audio_path)
+        if stream_ctx.slate_tts_segments and slate_audio_path:
+            _write_accumulated_audio(stream_ctx.slate_tts_segments, slate_audio_path)
+
+
+# ------ Helpers ------
+
+def _process_chunk(chunk, sample_rate, pipeline, stream_ctx, mqtt_client):
+    from ..stream_output import process_audio_chunk
+
+    return process_audio_chunk(
+        chunk,
+        sample_rate,
+        pipeline_cfg=pipeline,
+        stream_ctx=stream_ctx,
+        mqtt_cfg=MQTTConfig() if mqtt_client else None,
+    )
+
+
+def _get_wasapi_loopback_device_info(device_id=None):
+    """Return loopback device info dict or None."""
+    try:
+        import sounddevice as sd
+    except ImportError:
+        return None
+    devices = sd.query_devices()
+    for dev in devices:
+        if device_id and dev["name"] == device_id:
+            return dev
+        if "loopback" in dev.get("name", "").lower():
+            return dev
+    return None
+
+
+def _start_wasapi_capture(device_info, sample_rate, channels):
+    """Start a background WASAPI capture thread, return an queue."""
+    import queue
+    audio_queue = queue.Queue()
+
+    def capture_worker():
+        import sounddevice as sd
+        with sd.InputStream(
+            device=device_info.get("name"),
+            channels=channels,
+            samplerate=sample_rate,
+            dtype="float32",
+        ) as stream:
+            while not threading.current_thread().daemon:
+                data, _ = stream.read(int(stream.samplerate * 0.5))
+                audio_queue.put(data.copy())
+
+    t = threading.Thread(target=capture_worker, daemon=True)
+    t.start()
+    return audio_queue
+
+
+def _write_accumulated_audio(segments, path):
+    if not segments:
+        return
+    audio_data = np.concatenate(segments, axis=0)
+    output_audio(audio_data, path)

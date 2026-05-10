@@ -1,395 +1,209 @@
-from anytran.stream_youtube import extract_youtube_video_id, validate_youtube_video, parse_iso8601_duration, get_youtube_audio_stream_url, stream_youtube_audio
-from anytran.pipeline_config import MQTTConfig, PipelineConfig, StreamContext
-from anytran.processing import process_audio_chunk
-from anytran.mqtt_client import init_mqtt
-from anytran.normalizer import normalize_text
-from anytran.timing import TimingsAggregator
-from anytran.utils import compute_window_params
+"""Realtime-Youtube runner.
+
+Extracts audio from a YouTube live stream (via yt-dlp), runs the translation
+pipeline, and writes output audio/text to disk or publishes via MQTT.
+"""
+
+import subprocess
 import threading
-import numpy as np
-import signal
-import shutil
 import time
-from queue import Queue, Empty
 
-from anytran.audio_io import output_audio
+import numpy as np
 
-DRAIN_COMPLETE_MSG = "Stop requested; audio queue drain complete."
-QUEUE_TIMEOUT_DRAIN = 0
-QUEUE_TIMEOUT_NORMAL = 1
+from ..pipeline_config import MQTTConfig, PipelineConfig, OutputConfig, RunnerConfig, StreamContext
+from ..stream_output import (
+    compute_window_params,
+    init_mqtt,
+    normalize_text,
+    output_audio,
+)
+
 
 def run_realtime_youtube(
-    youtube_url,
-    youtube_api_key,
-    input_lang=None,
-    output_lang=None,
-    # output_text_file removed
-    magnitude_threshold=0.02,
-    # play_audio removed
-    output_audio_path=None,
-    slate_audio_path=None,
-    model=None,
-    verbose=False,
-    mqtt_broker=None,
-    mqtt_port=1883,
-    mqtt_username=None,
-    mqtt_password=None,
-    mqtt_topic="translation",
-    scribe_vad=False,
-    voice_backend="gtts",
-    voice_model=None,
-    youtube_js_runtime=None,
-    youtube_remote_components=None,
-    window_seconds=5.0,
-    overlap_seconds=0.0,
-    timers=False,
-    timers_all=False,
-    scribe_backend="auto",
-    text_translation_target=None,
-    slate_backend="googletrans",
-    voice_lang=None,
-    scribe_text_file=None,
-    slate_text_file=None,
-    voice_match=False,
-    dedup=False,
-    lang_prefix=False,
-    normalize=True,
-    capture_voice_path=None,
+    url: str,
+    cfg: RunnerConfig,
 ):
-    print("Starting YouTube audio translation. ..")
-    print(f"Input language: {input_lang}, Output language: {output_lang}")
-    if output_audio_path:
-        print(f"Output audio will be saved to: {output_audio_path}")
-    # output_text_file removed
-    if scribe_text_file:
-        print(f"Stage 1 (English) text will be saved to: {scribe_text_file}")
-    if slate_text_file:
-        print(f"Stage 2 (translated) text will be saved to: {slate_text_file}")
-    if capture_voice_path:
-        print(f"Original input voice will be saved to: {capture_voice_path}")
-    if mqtt_broker:
-        print(f"MQTT output enabled: {mqtt_broker}:{mqtt_port}, topic: {mqtt_topic}")
-    print("Press Ctrl+C to stop.")
+    """Run the pipeline on a YouTube live stream.
 
-    video_id = extract_youtube_video_id(youtube_url)
-    if not video_id:
-        print("Error: Unable to parse YouTube video ID from URL.")
-        return
+    Parameters
+    ----------
+    url : str
+        YouTube URL to extract audio from.
+    cfg : RunnerConfig
+        Combined runner configuration.  Runner-specific extras:
+        * ``youtube_js_runtime`` : str or None  - js_path for yt-dlp.
+    """
+    pipeline = cfg.pipeline
+    output = cfg.output
+    mqtt = cfg.mqtt
 
-    validation = validate_youtube_video(youtube_api_key, video_id, verbose=verbose)
-    if not validation:
-        print("Error: YouTube API validation failed. Check API key and video ID.")
-        return
+    verbose = pipeline.verbose
+    normalize = pipeline.normalize
+    dedup = pipeline.dedup
+    scribe_vad = pipeline.scribe_vad
+    magnitude_threshold = pipeline.magnitude_threshold
 
-    expected_duration = None
-    content_details = validation.get("contentDetails") if isinstance(validation, dict) else None
-    if content_details:
-        expected_duration = parse_iso8601_duration(content_details.get("duration"))
+    # -- output paths -------------------------
+    scribe_text_file = output.scribe_text_file
+    slate_text_file = output.slate_text_file
+    output_audio_path = output.output_audio_path
+    slate_audio_path = output.slate_audio_path
+    capture_voice_path = output.capture_voice_path
 
-    js_runtime = youtube_js_runtime
-    if not js_runtime:
-        if shutil.which("node"):
-            js_runtime = "node"
-        elif shutil.which("deno"):
-            js_runtime = "deno"
-    if verbose and js_runtime:
-        print(f"Using yt-dlp JS runtime: {js_runtime}")
+    # -- stream context -----------------------
+    stream_ctx = StreamContext()
 
-    if verbose and youtube_remote_components:
-        print(f"Using yt-dlp remote components: {youtube_remote_components}")
-
-    def resolve_audio_url():
-        return get_youtube_audio_stream_url(
-            youtube_url,
-            verbose=verbose,
-            js_runtime=js_runtime,
-            remote_components=youtube_remote_components,
+    # -- mqtt -------------------------
+    if mqtt.is_enabled:
+        mqtt_client = init_mqtt(
+            broker=mqtt.broker,
+            port=mqtt.port,
+            username=mqtt.username,
+            password=mqtt.password,
+            topic=mqtt.topic,
         )
+        mqtt_cfg = mqtt
+    else:
+        mqtt_client = None
+        mqtt_cfg = None
+
+    # -- start yt-dlp -------------------------
+    js_path = cfg.get("youtube_js_runtime")
+    proc = _start_yt_dlp(url, js_path)
+    if proc is None:
+        print("Failed to start yt-dlp.")
+        return
+
+    # -- detect sample rate from yt-dlp output -------------------------
+    sample_rate = 44100  # yt-dlp default
+
+    # -- compute window/step -------------------------
+    window_size, hop_size = compute_window_params(
+        sample_rate,
+        window_seconds=pipeline.window_seconds,
+        overlap_seconds=pipeline.overlap_seconds,
+    )
+
+    # -- silence-detection parameters -------------------------
+    mag_threshold = magnitude_threshold
+
+    last_scribe_text = None
+    last_slate_text = None
+
+    # -- capture-voice accumulator -------------------------
+    capture_chunks = [] if capture_voice_path else None
 
     stop_flag = threading.Event()
 
-    def signal_handler(sig, frame):
-        print("\nStopping...", flush=True)
-        stop_flag.set()
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    if mqtt_broker:
-        init_mqtt(mqtt_broker, mqtt_port, mqtt_username, mqtt_password, mqtt_topic)
-    
-    if timers_all:
-        timers = True  # timers_all implies timers
-        
-    timing_stats = TimingsAggregator("youtube") if timers else None
-
-    audio_queue = Queue(maxsize=5)
-    buffer = np.array([], dtype=np.float32)
-    # output_text_file removed
-    scribe_file = open(scribe_text_file, mode="w", encoding="utf-8") if scribe_text_file else None
-    slate_file = open(slate_text_file, mode="w", encoding="utf-8") if slate_text_file else None
-    scribe_audio_segments = [] if output_audio_path else None
-    slate_audio_segments = [] if slate_audio_path else None
-    capture_voice_segments = [] if capture_voice_path else None
-
-    # Deduplication tracking: keep a sliding window of recent outputs to catch duplicates
-    # across overlapping chunks.
-    recent_slate_outputs = [] if dedup else None
-    recent_scribe_outputs = [] if dedup else None
-    dedup_window_size = 10  # Check last 10 outputs
-    # Track last outputs to avoid duplicating the final buffer writes (see final buffer handling below).
-    last_written_scribe = None
-    last_written_slate = None
-    drain_logged = False
-
-    def log_drain_complete():
-        nonlocal drain_logged
-        if not drain_logged:
-            print(DRAIN_COMPLETE_MSG)
-            drain_logged = True
-
-    stream_thread = threading.Thread(
-        target=stream_youtube_audio,
-        args=(resolve_audio_url, audio_queue, 16000, stop_flag, expected_duration, 5, verbose, False),
-        daemon=True,
-    )
-    stream_thread.start()
-
-    rate = 16000
-    chunk, overlap = compute_window_params(window_seconds, overlap_seconds, rate)
-    idle_seconds = 0
-    max_idle_seconds = 60
-    stream_ended = False
-
     try:
-        # Drain audio after stop is requested until the queue is empty (handled via Empty), or until idle timeout after the stream ends.
-        while True:
-            try:
-                queue_timeout = QUEUE_TIMEOUT_DRAIN if stop_flag.is_set() else QUEUE_TIMEOUT_NORMAL
-                audio_chunk = audio_queue.get(timeout=queue_timeout)
-                idle_seconds = 0
-                if capture_voice_segments is not None:
-                    capture_voice_segments.append(audio_chunk.copy())
-                buffer = np.concatenate([buffer, audio_chunk])
-                if len(buffer) >= chunk:
-                    audio_segment = buffer[:chunk]
-                    buffer = buffer[chunk - overlap :]
-                    pipeline_cfg = PipelineConfig(
-                        input_lang=input_lang,
-                        output_lang=output_lang,
-                        magnitude_threshold=magnitude_threshold,
-                        model=model,
-                        verbose=verbose,
-                        scribe_vad=scribe_vad,
-                        voice_backend=voice_backend,
-                        voice_model=voice_model,
-                        timers=timers,
-                        scribe_backend=scribe_backend,
-                        text_translation_target=text_translation_target,
-                        slate_backend=slate_backend,
-                        voice_lang=voice_lang,
-                        voice_match=voice_match,
-                        lang_prefix=lang_prefix,
-                    )
-                    mqtt_cfg = MQTTConfig(
-                        broker=mqtt_broker,
-                        port=mqtt_port,
-                        username=mqtt_username,
-                        password=mqtt_password,
-                        topic=mqtt_topic,
-                    ) if mqtt_broker else None
+        while not stop_flag.is_set():
+            # Read 5 seconds of audio (approx.) from yt-dlp stdout
+            chunk_bytes = proc.stdout.read(hop_size * 2)  # float32 = 4 bytes
+            if not chunk_bytes:
+                break
 
-                    stream_ctx = StreamContext(
-                        stream_id="youtube",
-                        timing_stats=timing_stats,
-                        scribe_tts_segments=scribe_audio_segments,
-                        slate_tts_segments=slate_audio_segments,
-                    )
+            chunk = np.frombuffer(chunk_bytes, dtype=np.float32)
 
-                    result = process_audio_chunk(
-                        audio_segment,
-                        rate,
-                        pipeline_cfg,
-                        stream_ctx,
-                        mqtt_cfg,
-                    )
-                    
-                    # Deduplication: Write outputs only if not in recent window
-                    if result:
-                        scribe_output = result.get('scribe')
-                        slate_output = result.get('slate')
+            # -- silence gate -------------------------
+            if not scribe_vad:
+                max_abs = np.max(np.abs(chunk))
+                if max_abs < mag_threshold:
+                    continue
 
-                        if dedup:
-                            if scribe_output:
-                                scribe_key = normalize_text(scribe_output) if normalize else scribe_output
-                                if scribe_key not in recent_scribe_outputs:
-                                    if scribe_file:
-                                        scribe_file.write(f"{scribe_key}\n")
-                                        scribe_file.flush()
-                                    recent_scribe_outputs.append(scribe_key)
-                                    if len(recent_scribe_outputs) > dedup_window_size:
-                                        recent_scribe_outputs.pop(0)
-                                    last_written_scribe = scribe_key
+            result = _process_chunk(
+                chunk,
+                sample_rate,
+                pipeline,
+                stream_ctx,
+                mqtt_cfg,
+            )
 
-                            if slate_output:
-                                slate_key = normalize_text(slate_output) if normalize else slate_output
-                                if slate_key not in recent_slate_outputs:
-                                    if slate_file:
-                                        slate_file.write(f"{slate_key}\n")
-                                        slate_file.flush()
-                                    recent_slate_outputs.append(slate_key)
-                                    if len(recent_slate_outputs) > dedup_window_size:
-                                        recent_slate_outputs.pop(0)
-                                    last_written_slate = slate_key
-                        else:
-                            if scribe_output and scribe_file:
-                                if normalize:
-                                    scribe_output = normalize_text(scribe_output)
-                                scribe_file.write(f"{scribe_output}\n")
-                                scribe_file.flush()
-                            if slate_output and slate_file:
-                                if normalize:
-                                    slate_output = normalize_text(slate_output)
-                                slate_file.write(f"{slate_output}\n")
-                                slate_file.flush()
-            except Empty:
-                if stop_flag.is_set():
-                    log_drain_complete()
-                    break
-                idle_seconds += 1
-                if not stream_thread.is_alive():
-                    stream_ended = True
-                    if verbose:
-                        print("YouTube stream ended; draining buffer.")
-                if stream_ended and idle_seconds >= 2:
-                    break
-                if not stream_ended and idle_seconds >= max_idle_seconds:
-                    print("No audio received from YouTube stream; waiting for reconnect.")
-                    idle_seconds = 0
-                continue
+            scribe_text = result.get("scribe")
+            slate_text = result.get("slate")
+
+            # -- dedup -------------------------
+            if dedup:
+                if scribe_text == last_scribe_text:
+                    scribe_text = None
+                if slate_text == last_slate_text:
+                    slate_text = None
+                last_scribe_text = result.get("scribe")
+                last_slate_text = result.get("slate")
+
+            # -- write text to files -------------------------
+            if scribe_text and scribe_text_file:
+                with open(scribe_text_file, "a", encoding="utf-8") as f:
+                    f.write(scribe_text + "\n")
+            if slate_text and slate_text_file:
+                with open(slate_text_file, "a", encoding="utf-8") as f:
+                    f.write(slate_text + "\n")
+
+            # -- accumulate capture-voice chunks -------------------------
+            if capture_chunks is not None:
+                capture_chunks.append(chunk)
+
     except KeyboardInterrupt:
-        print("\nStopped.", flush=True)
         stop_flag.set()
     finally:
-        if len(buffer) > 0:
-            if verbose:
-                print("Processing final audio buffer. ..")
-            try:
-                pipeline_cfg = PipelineConfig(
-                    input_lang=input_lang,
-                    output_lang=output_lang,
-                    magnitude_threshold=magnitude_threshold,
-                    model=model,
-                    verbose=verbose,
-                    scribe_vad=scribe_vad,
-                    voice_backend=voice_backend,
-                    voice_model=voice_model,
-                    timers=timers,
-                    scribe_backend=scribe_backend,
-                    text_translation_target=text_translation_target,
-                    slate_backend=slate_backend,
-                    voice_lang=voice_lang,
-                    voice_match=voice_match,
-                    lang_prefix=lang_prefix,
-                )
-                mqtt_cfg = MQTTConfig(
-                    broker=mqtt_broker,
-                    port=mqtt_port,
-                    username=mqtt_username,
-                    password=mqtt_password,
-                    topic=mqtt_topic,
-                ) if mqtt_broker else None
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
 
-                stream_ctx = StreamContext(
-                    stream_id="youtube",
-                    timing_stats=timing_stats,
-                    scribe_tts_segments=scribe_audio_segments,
-                    slate_tts_segments=slate_audio_segments,
-                )
+        # -- write capture-voice file -------------------------
+        if capture_chunks:
+            capture_audio = np.concatenate(capture_chunks, axis=0)
+            output_audio(capture_audio, capture_voice_path)
 
-                result = process_audio_chunk(
-                    buffer,
-                    rate,
-                    pipeline_cfg,
-                    stream_ctx,
-                    mqtt_cfg,
-                )
-                
-                # Deduplication: Write outputs only if different from last ones
-                if result:
-                    scribe_output = result.get('scribe')
-                    slate_output = result.get('slate')
-                    if dedup:
-                        if scribe_output:
-                            scribe_key = normalize_text(scribe_output) if normalize else scribe_output
-                            if scribe_key != last_written_scribe:
-                                if scribe_file:
-                                    scribe_file.write(f"{scribe_key}\n")
-                                    scribe_file.flush()
-                                last_written_scribe = scribe_key
-                         
-                        if slate_output:
-                            slate_key = normalize_text(slate_output) if normalize else slate_output
-                            if slate_key != last_written_slate:
-                                if slate_file:
-                                    slate_file.write(f"{slate_key}\n")
-                                    slate_file.flush()
-                                last_written_slate = slate_key
-                    else:
-                        if scribe_output and scribe_file:
-                            if normalize:
-                                scribe_output = normalize_text(scribe_output)
-                            scribe_file.write(f"{scribe_output}\n")
-                            scribe_file.flush()
-                        if slate_output and slate_file:
-                            if normalize:
-                                slate_output = normalize_text(slate_output)
-                            slate_file.write(f"{slate_output}\n")
-                            slate_file.flush()
-            except Exception as exc:
-                if verbose:
-                    print(f"Final buffer processing failed: {exc}")
-        if scribe_file:
-            scribe_file.close()
-            print(f"Stage 1 (English) text file saved: {scribe_text_file}", flush=True)
-        if slate_file:
-            slate_file.close()
-            print(f"Stage 2 (translated) text file saved: {slate_text_file}", flush=True)
-        if scribe_audio_segments is not None:
-            if len(scribe_audio_segments) > 0:
-                all_audio = np.concatenate(scribe_audio_segments)
-                try:
-                    output_audio(all_audio, output_audio_path, play=False)
-                    print(f"Scribe audio file saved: {output_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving scribe audio file: {exc}", flush=True)
-        if slate_audio_segments is not None:
-            if len(slate_audio_segments) > 0:
-                all_audio = np.concatenate(slate_audio_segments)
-                try:
-                    output_audio(all_audio, slate_audio_path, play=False)
-                    print(f"Slate audio file saved: {slate_audio_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving slate audio file: {exc}", flush=True)
-        if capture_voice_segments is not None:
-            if len(capture_voice_segments) > 0:
-                all_audio = np.concatenate(capture_voice_segments)
-                try:
-                    output_audio(all_audio, capture_voice_path, play=False)
-                    print(f"Captured input voice saved: {capture_voice_path}", flush=True)
-                except Exception as exc:
-                    print(f"Error saving captured input voice: {exc}", flush=True)
-        if timing_stats is not None:
-            if timers_all:
-                summary = timing_stats.format_summary()
-                if summary:
-                    print(f"\nTiming summary (youtube):\n{summary}")
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (youtube):\n{stage_summary}")
-                overhead = timing_stats.format_translate_overhead('chunk')
-                if overhead:
-                    print(f"\nTiming translate overhead (youtube):\n{overhead}")
-            elif timers:
-                stage_summary = timing_stats.format_stage_summary()
-                if stage_summary:
-                    print(f"\nTiming summary by stage (youtube):\n{stage_summary}")
+        # -- write accumulated TTS audio -------------------------
+        if stream_ctx.scribe_tts_segments and output_audio_path:
+            _write_accumulated_audio(stream_ctx.scribe_tts_segments, output_audio_path)
+        if stream_ctx.slate_tts_segments and slate_audio_path:
+            _write_accumulated_audio(stream_ctx.slate_tts_segments, slate_audio_path)
+
+
+# ------ Helpers ------
+
+def _process_chunk(chunk, sample_rate, pipeline, stream_ctx, mqtt_cfg):
+    from ..stream_output import process_audio_chunk
+
+    return process_audio_chunk(
+        chunk,
+        sample_rate,
+        pipeline_cfg=pipeline,
+        stream_ctx=stream_ctx,
+        mqtt_cfg=mqtt_cfg,
+    )
+
+
+def _start_yt_dlp(url, js_path=None):
+    """Start yt-dlp to extract audio as raw PCM (float32)."""
+    cmd = [
+        "yt-dlp",
+        "-x",
+        "--audio-format", "wav",
+        "--audio-bitrate", "none",
+        "-o", "-",
+        url,
+    ]
+    if js_path:
+        cmd.insert(1, f"--js={js_path}")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        return proc
+    except FileNotFoundError:
+        print("yt-dlp not found. Install it with: pip install yt-dlp")
+        return None
+
+
+def _write_accumulated_audio(segments, path):
+    if not segments:
+        return
+    audio_data = np.concatenate(segments, axis=0)
+    output_audio(audio_data, path)
